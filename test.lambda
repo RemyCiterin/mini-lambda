@@ -1,0 +1,11 @@
+fibo x =
+  if x != 0 then
+    if x-1 != 0
+    then fibo_caller(x-1) + fibo_caller(x-2)
+    else 1
+  else 0
+
+fibo_wrapper = \ x y -> fibo(x)
+fibo_caller x =
+  let foo x = fibo_wrapper(x, x) in
+  foo(x)
