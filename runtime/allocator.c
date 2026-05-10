@@ -13,6 +13,47 @@ static word_t* base_stack_pointer = NULL;
 static word_t *heap_buffer = NULL;
 static unsigned heap_size = 0;
 
+static word_t* heap_headers = NULL;
+static word_t* heap_marks = NULL;
+
+#define WORD_WIDTH (sizeof(word_t)*8)
+
+static bool is_header(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  return heap_headers[diff / WORD_WIDTH] >> index & 1;
+}
+
+static void set_header(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  heap_headers[diff / WORD_WIDTH] |= (word_t)1 << index;
+}
+
+static void clear_header(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  heap_headers[diff / WORD_WIDTH] &= ~((word_t)1 << index);
+}
+
+static bool is_marked(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  return heap_marks[diff / WORD_WIDTH] >> index & 1;
+}
+
+static void set_mark(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  heap_marks[diff / WORD_WIDTH] |= (word_t)1 << index;
+}
+
+static void clear_mark(word_t* ptr) {
+  word_t diff = ptr - heap_buffer;
+  word_t index = diff % WORD_WIDTH;
+  heap_marks[diff / WORD_WIDTH] &= ~((word_t)1 << index);
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// Contains informations about the current heap hole:
 ///   - heap_hole_len is the available length of the current hole from heap_hole_ptr
@@ -31,6 +72,18 @@ static word_t* heap_next_hole = NULL;
 word_t* alloc_get_base() { return heap_buffer; }
 
 void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
+  unsigned headers_len = (len + WORD_WIDTH-1) / WORD_WIDTH;
+
+  heap_headers = buf;
+  buf += headers_len;
+  len -= headers_len;
+  heap_marks = buf;
+  buf += headers_len;
+  len -= headers_len;
+
+  memset(heap_headers, 0, sizeof(word_t)*headers_len);
+  memset(heap_marks, 0, sizeof(word_t)*headers_len);
+
   base_stack_pointer = base_sp;
 
   heap_buffer = buf;
@@ -45,20 +98,18 @@ void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
   }
 }
 
-#define VISITED_HDR_MARK (1 << 31)
-
 void mark(word_t word) {
   if (!word_is_pointer(word)) return;
   word_t* ptr = word_to_ptr(word);
 
   if (ptr < heap_buffer || ptr >= heap_buffer + heap_size) return;
-  if (!word_is_header(ptr[0])) return;
-  if (ptr[0] & VISITED_HDR_MARK) return;
+  if (!is_header(ptr)) return;
+  if (is_marked(ptr)) return;
 
   // We have the confirmation that the pointer to a valid header in the heap, so
   // it is safe to write
   word_t header = ptr[0];
-  ptr[0] |= VISITED_HDR_MARK;
+  set_mark(ptr);
 
   if (word_to_header(header) == CLOSURE_HEADER) {
     closure_t* closure = word_to_closure(word);
@@ -82,6 +133,9 @@ void mark(word_t word) {
 }
 
 static void sweep() {
+  // Clears all the headers, reset the non-free locations later
+  for (int i=0; i < (heap_size+WORD_WIDTH-1) / WORD_WIDTH; i++) heap_headers[i] = 0;
+
   word_t* ptr = heap_buffer;
 
   word_t* region_ptr = NULL;
@@ -90,14 +144,14 @@ static void sweep() {
   while (ptr < heap_buffer + heap_size) {
     unsigned len = 0;
     while (ptr+len < heap_buffer + heap_size) {
-      if (word_is_header(ptr[len]) && (ptr[len] & VISITED_HDR_MARK) != 0) break;
+      if (is_marked(ptr+len)) break;
       ptr[len] = int_to_word(0);
       len++;
     }
 
     // `ptr` correspond to an allocated region
     if (len == 0) {
-      ptr[0] &= ~VISITED_HDR_MARK;
+      set_header(ptr);
 
       if (word_to_header(ptr[0]) == CLOSURE_HEADER) {
         word_t closure_size = word_to_int(((closure_t*)(ptr))->len);
@@ -129,6 +183,9 @@ static void sweep() {
     region_len = len;
     ptr += len;
   }
+
+  // Clear all the visited headers, prepare for the next GC call
+  for (int i=0; i < (heap_size+WORD_WIDTH-1) / WORD_WIDTH; i++) heap_marks[i] = 0;
 }
 
 #include <setjmp.h>
@@ -162,6 +219,7 @@ word_t* alloc_words(unsigned size) {
       word_t* ptr = heap_hole_ptr;
       heap_hole_ptr += size;
       heap_hole_len -= size;
+      set_header(ptr);
       return ptr;
     }
 

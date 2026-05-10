@@ -16,7 +16,7 @@ main_call =
   "word_t test_fibo(word_t x) { if (x < 2) return x; return test_fibo(x-1)+test_fibo(x-2); }\n" ++
   "int main() {\n" ++
   "  register word_t* base_sp asm(\"sp\");\n" ++
-  "  alloc_init(base_sp, allocation_buffer, 100000);\n" ++
+  "  alloc_init(base_sp, allocation_buffer, 10000000);\n" ++
   "  word_t buf;\n" ++
   "  buf = int_to_word(32);\n" ++
   "  clock_t t0 = clock();\n" ++

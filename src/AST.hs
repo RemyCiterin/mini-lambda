@@ -14,14 +14,14 @@ data Symbol
   deriving(Eq, Show)
 
 data Exp
-  = ELit Int
-  | EVar Id
-  | ESymbol Symbol
-  | EIte Exp Exp Exp
-  | EApply Exp [Exp]
-  | ELetIn Id Exp Exp
-  | ELambda [Id] Exp
-  | EAnnot Exp Type
+  = ELit Int            -- Constant integer
+  | EVar Id             -- Local variable or function call (before lowering)
+  | ESymbol Symbol      -- Known global symbol (C function, constructor, destructor...)
+  | EIte Exp Exp Exp    -- If Then Else
+  | EApply Exp [Exp]    -- Function application
+  | ELetIn Id Exp Exp   -- Local variable definition
+  | ELambda [Id] Exp    -- Lambda abstraction
+  | EAnnot Exp Type     -- Type annotation
   deriving(Eq)
 
 type Sigma = Type
