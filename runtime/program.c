@@ -79,489 +79,326 @@ word_t fn_arange(word_t* args)
 {
   word_t anon9;
   anon9 = args[0];
-  word_t anon10;
-  anon10 = int_to_word(0);
-  word_t anon11;
+  word_t anon10 = int_to_word(0);
+  word_t anon11[2] = { anon9,anon10 };
+  word_t anon12 = int_eq(anon11);;
+  word_t anon13;
+  if (word_to_int(anon12))
   {
-    word_t buf[2] = { anon9,anon10 };
-    anon11 = int_eq(buf);
-  }
-  word_t anon12;
-  if (word_to_int(anon11))
-  {
-    word_t anon13;
-    anon13 = fn_nil(NULL);
-    anon12 = anon13;
+    word_t anon14 = fn_nil(NULL);
+    anon13 = anon14;
   }
   else
   {
-    word_t anon14;
-    anon14 = int_to_word(0);
-    word_t anon15;
-    anon15 = closure_to_word(make_closure((word_t)fun1,1,0));
+    word_t anon15 = int_to_word(0);
     word_t anon16;
-    anon16 = int_to_word(1);
-    word_t anon17;
-    {
-      word_t buf[2] = { anon9,anon16 };
-      anon17 = int_sub(buf);
-    }
-    word_t anon18;
-    {
-      word_t buf[1] = { anon17 };
-      anon18 = fn_arange(buf);
-    }
-    word_t anon19;
-    {
-      word_t buf[2] = { anon15,anon18 };
-      anon19 = fn_map(buf);
-    }
-    word_t anon20;
-    {
-      word_t buf[2] = { anon14,anon19 };
-      anon20 = fn_cons(buf);
-    }
-    anon12 = anon20;
+    anon16 = closure_to_word(make_closure((word_t)fun1,1,0));
+    word_t anon17 = int_to_word(1);
+    word_t anon18[2] = { anon9,anon17 };
+    word_t anon19 = int_sub(anon18);;
+    word_t anon20[1] = { anon19 };
+    word_t anon21 = fn_arange(anon20);;
+    word_t anon22[2] = { anon16,anon21 };
+    word_t anon23 = fn_map(anon22);;
+    word_t anon24[2] = { anon15,anon23 };
+    word_t anon25 = fn_cons(anon24);;
+    anon13 = anon25;
   }
-  return anon12;
+  return anon13;
 }
 
 
 word_t fn_bar(word_t* args)
 {
-  word_t anon21;
-  anon21 = args[0];
-  word_t anon22;
-  anon22 = int_to_word(8);
-  word_t anon23;
-  anon23 = int_to_word(42);
-  word_t anon24;
-  {
-    word_t buf[2] = { anon22,anon23 };
-    anon24 = cons_BAR(buf);
-  }
-  return anon24;
+  word_t anon26;
+  anon26 = args[0];
+  word_t anon27 = int_to_word(8);
+  word_t anon28 = int_to_word(42);
+  word_t anon29[2] = { anon27,anon28 };
+  word_t anon30 = cons_BAR(anon29);;
+  return anon30;
 }
 
 
 word_t fn_cons(word_t* args)
 {
-  word_t anon25;
-  word_t anon26;
-  anon25 = args[0];
-  anon26 = args[1];
-  word_t anon27;
-  {
-    word_t buf[2] = { anon25,anon26 };
-    anon27 = cons_Node(buf);
-  }
-  return anon27;
+  word_t anon31;
+  word_t anon32;
+  anon31 = args[0];
+  anon32 = args[1];
+  word_t anon33[2] = { anon31,anon32 };
+  word_t anon34 = cons_Node(anon33);;
+  return anon34;
 }
 
 
 word_t fn_fibo(word_t* args)
 {
-  word_t anon28;
-  anon28 = args[0];
-  word_t anon29;
-  anon29 = int_to_word(0);
-  word_t anon30;
+  word_t anon35;
+  anon35 = args[0];
+  word_t anon36 = int_to_word(0);
+  word_t anon37[2] = { anon35,anon36 };
+  word_t anon38 = int_eq(anon37);;
+  word_t anon39;
+  if (word_to_int(anon38))
   {
-    word_t buf[2] = { anon28,anon29 };
-    anon30 = int_eq(buf);
-  }
-  word_t anon31;
-  if (word_to_int(anon30))
-  {
-    word_t anon32;
-    anon32 = fn_zero(NULL);
-    anon31 = anon32;
+    word_t anon40 = fn_zero(NULL);
+    anon39 = anon40;
   }
   else
   {
-    word_t anon33;
-    anon33 = int_to_word(1);
-    word_t anon34;
+    word_t anon41 = int_to_word(1);
+    word_t anon42[2] = { anon35,anon41 };
+    word_t anon43 = int_eq(anon42);;
+    word_t anon44;
+    if (word_to_int(anon43))
     {
-      word_t buf[2] = { anon28,anon33 };
-      anon34 = int_eq(buf);
-    }
-    word_t anon35;
-    if (word_to_int(anon34))
-    {
-      word_t anon36;
-      anon36 = fn_one(NULL);
-      anon35 = anon36;
+      word_t anon45 = fn_one(NULL);
+      anon44 = anon45;
     }
     else
     {
-      word_t anon37;
-      anon37 = fn_fibo_wrapper(NULL);
-      word_t anon38;
-      anon38 = int_to_word(1);
-      word_t anon39;
-      {
-        word_t buf[2] = { anon28,anon38 };
-        anon39 = int_sub(buf);
-      }
-      word_t anon40;
-      {
-        word_t buf[1] = { anon39 };
-        anon40 = apply_closure(word_to_closure(anon37),buf,1);
-      }
-      word_t anon41;
-      anon41 = fn_fibo_wrapper(NULL);
-      word_t anon42;
-      anon42 = int_to_word(2);
-      word_t anon43;
-      {
-        word_t buf[2] = { anon28,anon42 };
-        anon43 = int_sub(buf);
-      }
-      word_t anon44;
-      {
-        word_t buf[1] = { anon43 };
-        anon44 = apply_closure(word_to_closure(anon41),buf,1);
-      }
-      word_t anon45;
-      anon45 = int_to_word(0);
-      word_t anon46;
-      {
-        word_t buf[2] = { anon40,anon45 };
-        anon46 = extract_constructor(buf);
-      }
-      word_t anon47;
-      anon47 = int_to_word(0);
-      word_t anon48;
-      {
-        word_t buf[2] = { anon44,anon47 };
-        anon48 = extract_constructor(buf);
-      }
-      word_t anon49;
-      {
-        word_t buf[2] = { anon46,anon48 };
-        anon49 = int_add(buf);
-      }
-      anon35 = anon49;
+      word_t anon46 = fn_fibo_wrapper(NULL);
+      word_t anon47 = int_to_word(1);
+      word_t anon48[2] = { anon35,anon47 };
+      word_t anon49 = int_sub(anon48);;
+      word_t anon50[1] = { anon49 };
+      word_t anon51 = apply_closure(word_to_closure(anon46),anon50,1);;
+      word_t anon52 = fn_fibo_wrapper(NULL);
+      word_t anon53 = int_to_word(2);
+      word_t anon54[2] = { anon35,anon53 };
+      word_t anon55 = int_sub(anon54);;
+      word_t anon56[1] = { anon55 };
+      word_t anon57 = apply_closure(word_to_closure(anon52),anon56,1);;
+      word_t anon58 = int_to_word(0);
+      word_t anon59[2] = { anon51,anon58 };
+      word_t anon60 = extract_constructor(anon59);;
+      word_t anon61 = int_to_word(0);
+      word_t anon62[2] = { anon57,anon61 };
+      word_t anon63 = extract_constructor(anon62);;
+      word_t anon64[2] = { anon60,anon63 };
+      word_t anon65 = int_add(anon64);;
+      anon44 = anon65;
     }
-    anon31 = anon35;
+    anon39 = anon44;
   }
-  return anon31;
+  return anon39;
 }
 
 
 word_t fn_fibo_caller(word_t* args)
 {
-  word_t anon50;
-  anon50 = args[0];
-  word_t anon51;
-  {
-    word_t buf[1] = { anon50 };
-    anon51 = fn_fibo(buf);
-  }
-  word_t anon52;
-  {
-    word_t buf[1] = { anon51 };
-    anon52 = cons_FOO(buf);
-  }
-  word_t anon53;
-  anon53 = int_to_word(0);
-  word_t anon54;
-  {
-    word_t buf[2] = { anon52,anon53 };
-    anon54 = extract_constructor(buf);
-  }
-  return anon54;
+  word_t anon66;
+  anon66 = args[0];
+  word_t anon67[1] = { anon66 };
+  word_t anon68 = fn_fibo(anon67);;
+  word_t anon69[1] = { anon68 };
+  word_t anon70 = cons_FOO(anon69);;
+  word_t anon71 = int_to_word(0);
+  word_t anon72[2] = { anon70,anon71 };
+  word_t anon73 = extract_constructor(anon72);;
+  return anon73;
 }
 
 
 word_t fn_fibo_wrapper(word_t* args)
 {
-  word_t anon55;
-  anon55 = closure_to_word(make_closure((word_t)fun0,1,0));
-  return anon55;
+  word_t anon74;
+  anon74 = closure_to_word(make_closure((word_t)fun0,1,0));
+  return anon74;
 }
 
 
 word_t fn_foo(word_t* args)
 {
-  word_t anon56;
-  anon56 = args[0];
-  word_t anon57;
-  {
-    word_t buf[1] = { anon56 };
-    anon57 = cons_FOO(buf);
-  }
-  return anon57;
+  word_t anon75;
+  anon75 = args[0];
+  word_t anon76[1] = { anon75 };
+  word_t anon77 = cons_FOO(anon76);;
+  return anon77;
 }
 
 
 word_t fn_is_cons(word_t* args)
 {
-  word_t anon58;
-  anon58 = args[0];
-  word_t anon59;
-  {
-    word_t buf[1] = { anon58 };
-    anon59 = test_cons_Node(buf);
-  }
-  return anon59;
+  word_t anon78;
+  anon78 = args[0];
+  word_t anon79[1] = { anon78 };
+  word_t anon80 = test_cons_Node(anon79);;
+  return anon80;
 }
 
 
 word_t fn_is_nil(word_t* args)
 {
-  word_t anon60;
-  anon60 = args[0];
-  word_t anon61;
-  {
-    word_t buf[1] = { anon60 };
-    anon61 = test_cons_Node(buf);
-  }
-  word_t anon62;
-  {
-    word_t buf[1] = { anon61 };
-    anon62 = int_not(buf);
-  }
-  return anon62;
+  word_t anon81;
+  anon81 = args[0];
+  word_t anon82[1] = { anon81 };
+  word_t anon83 = test_cons_Node(anon82);;
+  word_t anon84[1] = { anon83 };
+  word_t anon85 = int_not(anon84);;
+  return anon85;
 }
 
 
 word_t fn_map(word_t* args)
 {
-  word_t anon63;
-  word_t anon64;
-  anon63 = args[0];
-  anon64 = args[1];
-  word_t anon65;
-  {
-    word_t buf[1] = { anon64 };
-    anon65 = fn_is_nil(buf);
-  }
-  word_t anon66;
-  if (word_to_int(anon65))
-  {
-    anon66 = anon64;
-  }
-  else
-  {
-    word_t anon67;
-    anon67 = int_to_word(0);
-    word_t anon68;
-    {
-      word_t buf[2] = { anon64,anon67 };
-      anon68 = extract_constructor(buf);
-    }
-    word_t anon69;
-    {
-      word_t buf[1] = { anon68 };
-      anon69 = apply_closure(word_to_closure(anon63),buf,1);
-    }
-    word_t anon70;
-    anon70 = int_to_word(1);
-    word_t anon71;
-    {
-      word_t buf[2] = { anon64,anon70 };
-      anon71 = extract_constructor(buf);
-    }
-    word_t anon72;
-    {
-      word_t buf[2] = { anon63,anon71 };
-      anon72 = fn_map(buf);
-    }
-    word_t anon73;
-    {
-      word_t buf[2] = { anon69,anon72 };
-      anon73 = fn_cons(buf);
-    }
-    anon66 = anon73;
-  }
-  return anon66;
-}
-
-
-word_t fn_member(word_t* args)
-{
-  word_t anon74;
-  word_t anon75;
-  anon74 = args[0];
-  anon75 = args[1];
-  word_t anon76;
-  {
-    word_t buf[1] = { anon75 };
-    anon76 = fn_is_cons(buf);
-  }
-  word_t anon77;
-  if (word_to_int(anon76))
-  {
-    word_t anon78;
-    anon78 = int_to_word(0);
-    word_t anon79;
-    {
-      word_t buf[2] = { anon75,anon78 };
-      anon79 = extract_constructor(buf);
-    }
-    word_t anon80;
-    {
-      word_t buf[2] = { anon74,anon79 };
-      anon80 = int_eq(buf);
-    }
-    word_t anon81;
-    anon81 = int_to_word(1);
-    word_t anon82;
-    {
-      word_t buf[2] = { anon75,anon81 };
-      anon82 = extract_constructor(buf);
-    }
-    word_t anon83;
-    {
-      word_t buf[2] = { anon74,anon82 };
-      anon83 = fn_member(buf);
-    }
-    word_t anon84;
-    {
-      word_t buf[2] = { anon80,anon83 };
-      anon84 = int_or(buf);
-    }
-    anon77 = anon84;
-  }
-  else
-  {
-    word_t anon85;
-    anon85 = int_to_word(0);
-    anon77 = anon85;
-  }
-  return anon77;
-}
-
-
-word_t fn_nil(word_t* args)
-{
   word_t anon86;
-  anon86 = int_to_word(0);
-  return anon86;
-}
-
-
-word_t fn_one(word_t* args)
-{
   word_t anon87;
-  anon87 = int_to_word(1);
-  return anon87;
-}
-
-
-word_t fn_sum(word_t* args)
-{
-  word_t anon88;
-  anon88 = args[0];
-  word_t anon89;
-  {
-    word_t buf[1] = { anon88 };
-    anon89 = fn_is_nil(buf);
-  }
+  anon86 = args[0];
+  anon87 = args[1];
+  word_t anon88[1] = { anon87 };
+  word_t anon89 = fn_is_nil(anon88);;
   word_t anon90;
   if (word_to_int(anon89))
   {
-    word_t anon91;
-    anon91 = int_to_word(0);
-    anon90 = anon91;
+    anon90 = anon87;
   }
   else
   {
-    word_t anon92;
-    anon92 = int_to_word(0);
-    word_t anon93;
-    {
-      word_t buf[2] = { anon88,anon92 };
-      anon93 = extract_constructor(buf);
-    }
-    word_t anon94;
-    anon94 = int_to_word(1);
-    word_t anon95;
-    {
-      word_t buf[2] = { anon88,anon94 };
-      anon95 = extract_constructor(buf);
-    }
-    word_t anon96;
-    {
-      word_t buf[1] = { anon95 };
-      anon96 = fn_sum(buf);
-    }
-    word_t anon97;
-    {
-      word_t buf[2] = { anon93,anon96 };
-      anon97 = int_add(buf);
-    }
-    anon90 = anon97;
+    word_t anon91 = int_to_word(0);
+    word_t anon92[2] = { anon87,anon91 };
+    word_t anon93 = extract_constructor(anon92);;
+    word_t anon94[1] = { anon93 };
+    word_t anon95 = apply_closure(word_to_closure(anon86),anon94,1);;
+    word_t anon96 = int_to_word(1);
+    word_t anon97[2] = { anon87,anon96 };
+    word_t anon98 = extract_constructor(anon97);;
+    word_t anon99[2] = { anon86,anon98 };
+    word_t anon100 = fn_map(anon99);;
+    word_t anon101[2] = { anon95,anon100 };
+    word_t anon102 = fn_cons(anon101);;
+    anon90 = anon102;
   }
   return anon90;
 }
 
 
+word_t fn_member(word_t* args)
+{
+  word_t anon103;
+  word_t anon104;
+  anon103 = args[0];
+  anon104 = args[1];
+  word_t anon105[1] = { anon104 };
+  word_t anon106 = fn_is_cons(anon105);;
+  word_t anon107;
+  if (word_to_int(anon106))
+  {
+    word_t anon108 = int_to_word(0);
+    word_t anon109[2] = { anon104,anon108 };
+    word_t anon110 = extract_constructor(anon109);;
+    word_t anon111[2] = { anon103,anon110 };
+    word_t anon112 = int_eq(anon111);;
+    word_t anon113 = int_to_word(1);
+    word_t anon114[2] = { anon104,anon113 };
+    word_t anon115 = extract_constructor(anon114);;
+    word_t anon116[2] = { anon103,anon115 };
+    word_t anon117 = fn_member(anon116);;
+    word_t anon118[2] = { anon112,anon117 };
+    word_t anon119 = int_or(anon118);;
+    anon107 = anon119;
+  }
+  else
+  {
+    word_t anon120 = int_to_word(0);
+    anon107 = anon120;
+  }
+  return anon107;
+}
+
+
+word_t fn_nil(word_t* args)
+{
+  word_t anon121 = int_to_word(0);
+  return anon121;
+}
+
+
+word_t fn_one(word_t* args)
+{
+  word_t anon122 = int_to_word(1);
+  return anon122;
+}
+
+
+word_t fn_sum(word_t* args)
+{
+  word_t anon123;
+  anon123 = args[0];
+  word_t anon124[1] = { anon123 };
+  word_t anon125 = fn_is_nil(anon124);;
+  word_t anon126;
+  if (word_to_int(anon125))
+  {
+    word_t anon127 = int_to_word(0);
+    anon126 = anon127;
+  }
+  else
+  {
+    word_t anon128 = int_to_word(0);
+    word_t anon129[2] = { anon123,anon128 };
+    word_t anon130 = extract_constructor(anon129);;
+    word_t anon131 = int_to_word(1);
+    word_t anon132[2] = { anon123,anon131 };
+    word_t anon133 = extract_constructor(anon132);;
+    word_t anon134[1] = { anon133 };
+    word_t anon135 = fn_sum(anon134);;
+    word_t anon136[2] = { anon130,anon135 };
+    word_t anon137 = int_add(anon136);;
+    anon126 = anon137;
+  }
+  return anon126;
+}
+
+
 word_t fn_total(word_t* args)
 {
-  word_t anon98;
-  anon98 = int_to_word(4002);
-  word_t anon99;
-  {
-    word_t buf[1] = { anon98 };
-    anon99 = fn_arange(buf);
-  }
-  word_t anon100;
-  {
-    word_t buf[1] = { anon99 };
-    anon100 = fn_sum(buf);
-  }
-  return anon100;
+  word_t anon138 = int_to_word(4002);
+  word_t anon139[1] = { anon138 };
+  word_t anon140 = fn_arange(anon139);;
+  word_t anon141[1] = { anon140 };
+  word_t anon142 = fn_sum(anon141);;
+  return anon142;
 }
 
 
 word_t fn_zero(word_t* args)
 {
-  word_t anon101;
-  anon101 = int_to_word(0);
-  return anon101;
+  word_t anon143 = int_to_word(0);
+  return anon143;
 }
 
 
 word_t fun0(word_t* args)
 {
-  word_t anon102;
-  anon102 = args[0];
-  word_t anon103;
-  {
-    word_t buf[1] = { anon102 };
-    anon103 = fn_fibo(buf);
-  }
-  word_t anon104;
-  {
-    word_t buf[1] = { anon103 };
-    anon104 = cons_FOO(buf);
-  }
-  return anon104;
+  word_t anon144;
+  anon144 = args[0];
+  word_t anon145[1] = { anon144 };
+  word_t anon146 = fn_fibo(anon145);;
+  word_t anon147[1] = { anon146 };
+  word_t anon148 = cons_FOO(anon147);;
+  return anon148;
 }
 
 
 word_t fun1(word_t* args)
 {
-  word_t anon105;
-  anon105 = args[0];
-  word_t anon106;
-  anon106 = int_to_word(1);
-  word_t anon107;
-  {
-    word_t buf[2] = { anon105,anon106 };
-    anon107 = int_add(buf);
-  }
-  return anon107;
+  word_t anon149;
+  anon149 = args[0];
+  word_t anon150 = int_to_word(1);
+  word_t anon151[2] = { anon149,anon150 };
+  word_t anon152 = int_add(anon151);;
+  return anon152;
 }
 
 #include <stdio.h>
 #include <time.h>
-word_t allocation_buffer[100000000];word_t test_fibo(word_t x) { if (x < 2) return x; return test_fibo(x-1)+test_fibo(x-2); }
+word_t allocation_buffer[100000000];
+word_t test_fibo(word_t x) { if (x < 2) return x; return test_fibo(x-1)+test_fibo(x-2); }
 int main() {
-  register word_t* base_sp asm("sp");  alloc_init(base_sp, allocation_buffer, 100000);
+  register word_t* base_sp asm("sp");
+  alloc_init(base_sp, allocation_buffer, 100000);
   word_t buf;
   buf = int_to_word(32);
   clock_t t0 = clock();

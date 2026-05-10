@@ -50,6 +50,12 @@ declare = do
   insert $ "word_t " ++ x ++ ";"
   return x
 
+declareAs :: String -> CGen String
+declareAs s = do
+  x <- fresh
+  insert $ "word_t " ++ x ++ " = " ++ s ++ ";"
+  return x
+
 declareList :: Int -> CGen [String]
 declareList 0 = return []
 declareList n = do
@@ -105,8 +111,7 @@ compileDecls decls = do
 compileExp :: (M.Map Id Id) -> Exp -> CGen String
 compileExp env (EVar v) = return (env M.! v)
 compileExp _ (ELit i) = do
-  var <- declare
-  assign var ("int_to_word("++show i++")")
+  var <- declareAs ("int_to_word("++show i++")")
   return var
 
 compileExp env (EAnnot e _) = compileExp env e
@@ -115,8 +120,8 @@ compileExp _ (ELambda _ _) =
   error "lambda are not supported at this stage of the compilation"
 
 compileExp _ (ESymbol (Fun f 0)) = do
-  var <- declare
-  assign var (f++"(NULL)")
+  var <- fresh
+  insert $ "word_t "++var++" = "++f++"(NULL);"
   return var
 
 compileExp _ (ESymbol (ConstructorMk _)) =
@@ -141,20 +146,18 @@ compileExp env (EApply fun []) = compileExp env fun
 
 compileExp env (EApply (ESymbol (Fun f n)) es) | n == length es = do
   vs <- mapM (compileExp env) es
-  var <- declare
-  scope $ do
-    insert $ "word_t buf["++show n++"] = { " ++ concat (intersperse "," vs) ++ " };"
-    assign var $ f++"(buf)"
+  buf <- fresh
+  insert $ "word_t "++buf++"["++show n++"] = { " ++ concat (intersperse "," vs) ++ " };"
+  var <- declareAs $ f++"("++buf++");"
   return var
 
 compileExp env (EApply fun es) = do
   let m = length es
   f <- compileExp env fun
   vs <- mapM (compileExp env) es
-  var <- declare
-  scope $ do
-    insert $ "word_t buf["++show m++"] = { " ++ concat (intersperse "," vs) ++ " };"
-    assign var ("apply_closure(word_to_closure("++f++"),buf,"++show m++")")
+  buf <- fresh
+  insert $ "word_t "++buf++"["++show m++"] = { " ++ concat (intersperse "," vs) ++ " };"
+  var <- declareAs $ "apply_closure(word_to_closure("++f++"),"++buf++","++show m++");"
   return var
 
 compileExp env (EIte i_exp t_exp e_exp) = do
