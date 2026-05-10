@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <alloca.h>
 #include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <stdio.h>
 
 typedef size_t word_t;
 
@@ -34,6 +37,8 @@ void alloc_stats(unsigned* gc_calls, double* gc_time);
 
 /// Headers of allocated objects
 #define CLOSURE_HEADER 128
+
+#define CONSTRUCTOR_HEADER 127
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// Builtin integer functions
@@ -79,6 +84,49 @@ inline word_t int_xor(word_t* args) {
   return int_to_word(word_to_int(args[0]) ^ word_to_int(args[1])); }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+/// Allocated objects: constructors
+///////////////////////////////////////////////////////////////////////////////////////////////////
+typedef struct {
+  word_t header;
+  word_t tag;
+  word_t len;
+  word_t buf[0];
+} constructor_t;
+
+word_t* alloc_get_base();
+
+inline bool word_is_constructor(word_t x) {
+  return word_is_pointer(x) && *word_to_ptr(x) == header_to_word(CONSTRUCTOR_HEADER); }
+inline word_t constructor_to_word(constructor_t* x) { return ptr_to_word((word_t*)x); }
+inline constructor_t* word_to_constructor(word_t x) { return (constructor_t*)word_to_ptr(x); }
+
+inline constructor_t* make_constructor(unsigned tag, word_t* buf, word_t len) {
+  constructor_t* obj = (constructor_t*)alloc_words(sizeof(constructor_t)/sizeof(word_t) + len);
+  obj->header = header_to_word(CONSTRUCTOR_HEADER);
+  memcpy(obj->buf, buf, len*sizeof(word_t));
+  obj->tag = int_to_word(tag);
+  obj->len = int_to_word(len);
+  return obj;
+}
+
+
+inline word_t extract_constructor(word_t *args) {
+  constructor_t* obj = word_to_constructor(args[0]);
+  return obj->buf[word_to_int(args[1])];
+}
+
+inline bool test_constructor(word_t arg, unsigned tag) {
+  if (!word_is_constructor(arg)) return 0;
+  constructor_t* obj = word_to_constructor(arg);
+  return word_to_int(obj->tag) == tag;
+}
+
+inline unsigned constructor_tag(word_t constructor) {
+  constructor_t* obj = word_to_constructor(constructor);
+  return obj->tag;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 /// Allocated objects: closures
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -96,7 +144,7 @@ inline word_t closure_to_word(closure_t* x) { return ptr_to_word((word_t*)x); }
 inline closure_t* word_to_closure(word_t x) { return (closure_t*)word_to_ptr(x); }
 
 inline closure_t* make_closure(word_t fun, word_t arity, word_t len) {
-  closure_t* obj = (closure_t*)alloc_words(sizeof(closure_t) /sizeof(word_t*) + len);
+  closure_t* obj = (closure_t*)alloc_words(sizeof(closure_t)/sizeof(word_t) + len);
   obj->header = header_to_word(CLOSURE_HEADER);
   obj->arity = int_to_word(arity);
   obj->len = int_to_word(len);

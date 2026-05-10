@@ -1,5 +1,6 @@
 #include "object.h"
 
+#include <stdbool.h>
 #include <assert.h>
 #include <stdio.h>
 #include <time.h>
@@ -27,6 +28,8 @@ static word_t* heap_hole_ptr = NULL;
 static unsigned heap_hole_len = 0;
 static word_t* heap_next_hole = NULL;
 
+word_t* alloc_get_base() { return heap_buffer; }
+
 void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
   base_stack_pointer = base_sp;
 
@@ -48,7 +51,7 @@ void mark(word_t word) {
   if (!word_is_pointer(word)) return;
   word_t* ptr = word_to_ptr(word);
 
-  if (ptr < heap_buffer || ptr > heap_buffer + heap_size) return;
+  if (ptr < heap_buffer || ptr >= heap_buffer + heap_size) return;
   if (!word_is_header(ptr[0])) return;
   if (ptr[0] & VISITED_HDR_MARK) return;
 
@@ -64,6 +67,14 @@ void mark(word_t word) {
 
     for (int i=0; i < len; i++) {
       mark(closure->buf[i]);
+    }
+  } else if (word_to_header(header) == CONSTRUCTOR_HEADER) {
+    constructor_t* constructor = word_to_constructor(word);
+
+    unsigned len = word_to_int(constructor->len);
+
+    for (int i=0; i < len; i++) {
+      mark(constructor->buf[i]);
     }
   } else {
     assert(false);
@@ -87,9 +98,18 @@ static void sweep() {
     // `ptr` correspond to an allocated region
     if (len == 0) {
       ptr[0] &= ~VISITED_HDR_MARK;
-      word_t closure_size = word_to_int(((closure_t*)(ptr))->len);
-      ptr += (sizeof(closure_t) / sizeof(word_t)) + closure_size;
-      continue;
+
+      if (word_to_header(ptr[0]) == CLOSURE_HEADER) {
+        word_t closure_size = word_to_int(((closure_t*)(ptr))->len);
+        ptr += (sizeof(closure_t) / sizeof(word_t)) + closure_size;
+        continue;
+      } else if (word_to_header(ptr[0]) == CONSTRUCTOR_HEADER) {
+        word_t constructor_size = word_to_int(((constructor_t*)(ptr))->len);
+        ptr += (sizeof(constructor_t) / sizeof(word_t)) + constructor_size;
+        continue;
+      } else {
+        assert(false);
+      }
     }
 
     // Skip: not enough space for the region header
@@ -104,7 +124,7 @@ static void sweep() {
     heap_next_hole = region_ptr;
 
     ptr[0] = ptr_to_word(region_ptr);
-    ptr[1] = int_to_word(region_len);
+    ptr[1] = int_to_word(len);
     region_ptr = ptr;
     region_len = len;
     ptr += len;
@@ -137,21 +157,23 @@ static void gc() {
 
 #include <stdio.h>
 word_t* alloc_words(unsigned size) {
-  if (size <= heap_hole_len) {
-    word_t* ptr = heap_hole_ptr;
-    heap_hole_ptr += size;
-    heap_hole_len -= size;
-    return ptr;
-  }
+  while (1) {
+    if (size <= heap_hole_len) {
+      word_t* ptr = heap_hole_ptr;
+      heap_hole_ptr += size;
+      heap_hole_len -= size;
+      return ptr;
+    }
 
-  if (heap_next_hole == NULL) gc();
-  else {
-    heap_hole_ptr = heap_next_hole;
-    heap_next_hole = word_to_ptr(heap_hole_ptr[0]);
-    heap_hole_len = word_to_int(heap_hole_ptr[1]);
-  }
+    if (heap_next_hole) {
+      heap_hole_ptr = heap_next_hole;
+      heap_next_hole = word_to_ptr(heap_hole_ptr[0]);
+      heap_hole_len = word_to_int(heap_hole_ptr[1]);
+      continue;
+    }
 
-  return alloc_words(size);
+    gc();
+  }
 }
 
 void alloc_stats(unsigned* gc_calls, double* gc_time) {

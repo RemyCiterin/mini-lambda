@@ -1,2 +1,3 @@
 runtime/main
+runtime/program.c
 dist-newstyle
