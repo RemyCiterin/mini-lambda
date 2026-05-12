@@ -13,13 +13,17 @@ typedef size_t word_t;
 #define PTR_MASK 0b00 // Pointer
 #define HDR_MASK 0b10 // Header of an allocated object
 
+bool is_valid_pointer(word_t x);
+
 inline bool word_is_int(word_t x) { return (x&1) == 1; }
 inline word_t int_to_word(word_t x) { return (x << 1) | 1; }
 inline word_t word_to_int(word_t x) { return x >> 1; }
 
-inline bool word_is_pointer(word_t x) { return (x&3) == PTR_MASK; }
+inline bool word_is_pointer(word_t x) { return x % sizeof(word_t) == 0; }
 inline word_t ptr_to_word(word_t* x) { return (word_t)x; }
-inline word_t* word_to_ptr(word_t x) { return (word_t*)x; }
+inline word_t* word_to_ptr(word_t x) {
+  assert(is_valid_pointer(x));
+  return (word_t*)x; }
 
 typedef word_t hdr_t;
 inline bool word_is_header(word_t x) { return (x&3) == HDR_MASK; }
@@ -138,10 +142,12 @@ typedef struct {
   word_t buf[0];
 } closure_t;
 
-inline bool word_is_closure(word_t x) {
-  return word_is_pointer(x) && *word_to_ptr(x) == header_to_word(CLOSURE_HEADER); }
+//inline bool word_is_closure(word_t x) {
+//  return word_is_pointer(x) && *word_to_ptr(x) == header_to_word(CLOSURE_HEADER); }
 inline word_t closure_to_word(closure_t* x) { return ptr_to_word((word_t*)x); }
-inline closure_t* word_to_closure(word_t x) { return (closure_t*)word_to_ptr(x); }
+inline closure_t* word_to_closure(word_t x) {
+  assert(is_valid_pointer(x));
+  return (closure_t*)word_to_ptr(x); }
 
 inline closure_t* make_closure(word_t fun, word_t arity, word_t len) {
   closure_t* obj = (closure_t*)alloc_words(sizeof(closure_t)/sizeof(word_t) + len);

@@ -69,18 +69,23 @@ executable mini-lambda
       AST
       Backend
       Parser
-      Closures
+      Lower
+      Lexer
+      Parse
 
     -- LANGUAGE extensions used by modules in this package.
     default-extensions:
       BlockArguments
       DuplicateRecordFields
+      DeriveDataTypeable
 
     -- Other library packages from which modules are imported.
     build-depends:
       base ^>=4.19.2.0,
       containers,
-      parsec
+      parsec,
+      uniplate,
+      mtl
 
     -- Directories containing source files.
     hs-source-dirs:   src

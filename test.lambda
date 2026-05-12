@@ -8,50 +8,52 @@ fibo_rec x =
 
 fibo x =
   if x == 0
-  then zero
+  then 0
   else
     if x == 1
-    then one
+    then 1
     else begin
-      let lhs = fibo_wrapper(x-1) in
-      let rhs = fibo_wrapper(x-2) in
-      (lhs[0]) + (rhs[0])
+      let lhs y = fibo (x-1) in
+      -- let lhs = fibo_wrapper(x-1) in
+      -- let rhs = fibo_wrapper(x-2) in
+      (lhs(0)) + fibo(x-2)
     end
 
-one = 1
-zero = 0
+-- one = 1
+-- zero = 0
 
-fibo_wrapper = \ x -> (FOO(fibo(x)))
-fibo_caller x =
-  let y = (FOO(fibo(x))) in
-  y[0]
+-- fibo_wrapper = \ x -> (FOO(fibo(x)))
+-- fibo_caller x =
+--   let y = (FOO(fibo(x))) in
+--   y[0]
+--
+--  record FOO(1)
+--  foo x = FOO(x)
 
-record FOO(1)
-foo x = FOO(x)
-
-record BAR(2)
-bar x = BAR(8, 42)
-
-
-record Node(2)
-
-nil = 1
-cons x xs = Node(x, xs)
-is_cons x = ?Node(x)
-is_nil x = ! ?Node(x)
-
-member x list =
-  if is_cons(list)
-  then x == list[0] || member(x, list[1])
-  else 0
-
-map f list =
-  if is_nil(list) then list else cons(f(list[0]), map(f, list[1]))
-
-arange x =
-  if x == 0 then nil else cons(0, map(\ x -> x+1, arange(x-1)))
-
-sum list =
-  if is_nil(list) then 0 else list[0] + sum(list[1])
-
-total = sum(arange(1000))
+-- record BAR(2)
+-- bar x = BAR(8, 42)
+--
+--
+-- record Node(2)
+--
+-- nil = 1
+-- cons x xs = Node(x, xs)
+-- is_cons x = ?Node(x)
+-- is_nil x = ! ?Node(x)
+--
+-- member x list =
+--   if is_cons(list)
+--   then x == list[0] || member(x, list[1])
+--   else 0
+--
+-- map f list =
+--     if is_nil(list) then list else cons(f(list[0]), map(f, list[1]))
+-- arange x =
+--   if x == 0 then nil else cons(0, map(\ x -> x+1, arange(x-1)))
+--
+-- sum list =
+--   if is_nil(list) then 0 else list[0] + sum(list[1])
+--
+-- total = sum(arange(1001))
+--
+-- turing f = \ f -> let a = (\ x -> f(x(x))) in a(a)

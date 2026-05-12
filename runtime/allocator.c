@@ -16,6 +16,8 @@ static unsigned heap_size = 0;
 static word_t* heap_headers = NULL;
 static word_t* heap_marks = NULL;
 
+#define NIL NULL
+
 #define WORD_WIDTH (sizeof(word_t)*8)
 
 static bool is_header(word_t* ptr) {
@@ -54,6 +56,10 @@ static void clear_mark(word_t* ptr) {
   heap_marks[diff / WORD_WIDTH] &= ~((word_t)1 << index);
 }
 
+bool is_valid_pointer(word_t x) {
+  return word_is_pointer(x) && heap_buffer <= (word_t*)x && (word_t*)x < heap_buffer + heap_size;
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 /// Contains informations about the current heap hole:
 ///   - heap_hole_len is the available length of the current hole from heap_hole_ptr
@@ -80,6 +86,8 @@ void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
   heap_marks = buf;
   buf += headers_len;
   len -= headers_len;
+  //heap_headers = malloc(headers_len * sizeof(word_t));
+  //heap_marks = malloc(headers_len * sizeof(word_t));
 
   memset(heap_headers, 0, sizeof(word_t)*headers_len);
   memset(heap_marks, 0, sizeof(word_t)*headers_len);
@@ -91,7 +99,7 @@ void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
 
   heap_hole_ptr = buf;
   heap_hole_len = len;
-  heap_next_hole = NULL;
+  heap_next_hole = NIL;
 
   for (int i=0; i < len; i++) {
     buf[i] = int_to_word(0);
@@ -100,7 +108,7 @@ void alloc_init(word_t* base_sp, word_t* buf, unsigned len) {
 
 void mark(word_t word) {
   if (!word_is_pointer(word)) return;
-  word_t* ptr = word_to_ptr(word);
+  word_t* ptr = (word_t*)(word);
 
   if (ptr < heap_buffer || ptr >= heap_buffer + heap_size) return;
   if (!is_header(ptr)) return;
@@ -138,7 +146,7 @@ static void sweep() {
 
   word_t* ptr = heap_buffer;
 
-  word_t* region_ptr = NULL;
+  word_t* region_ptr = NIL;
   word_t region_len = 0;
 
   while (ptr < heap_buffer + heap_size) {
@@ -177,8 +185,8 @@ static void sweep() {
     heap_hole_ptr = ptr;
     heap_next_hole = region_ptr;
 
-    ptr[0] = ptr_to_word(region_ptr);
-    ptr[1] = int_to_word(len);
+    ptr[0] = (word_t)region_ptr;
+    ptr[1] = (word_t)len;
     region_ptr = ptr;
     region_len = len;
     ptr += len;
@@ -223,10 +231,10 @@ word_t* alloc_words(unsigned size) {
       return ptr;
     }
 
-    if (heap_next_hole) {
+    if (heap_next_hole != NIL) {
       heap_hole_ptr = heap_next_hole;
-      heap_next_hole = word_to_ptr(heap_hole_ptr[0]);
-      heap_hole_len = word_to_int(heap_hole_ptr[1]);
+      heap_next_hole = (word_t*)(heap_hole_ptr[0]);
+      heap_hole_len = heap_hole_ptr[1];
       continue;
     }
 

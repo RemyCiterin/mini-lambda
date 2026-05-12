@@ -210,13 +210,11 @@ testConsExpr = do
   x <- constructor
   e <- parens expr
   return (EApply (ESymbol (ConstructorTest x)) [e])
-  --return (EApply (ESymbol (globalConsTest x) 1) [e])
 
 extractConsExpr :: Parser Exp
 extractConsExpr = do
   e <- identifier
   i <- brackets integer
-  --return (EApply (ESymbol "extract_constructor" 2) [(EVar e), ELit (fromInteger i)])
   return (EApply (ESymbol ConstructorExtract) [(EVar e), ELit (fromInteger i)])
 
 appExpr :: Parser Exp
