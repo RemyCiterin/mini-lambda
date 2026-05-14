@@ -5,15 +5,14 @@ import qualified AST
 
 import Data.Char
 
-import Text.Parsec hiding(token)
+import Text.Parsec hiding(token,State)
 import qualified Text.Parsec
 
-import Control.Monad
 import Control.Monad.Identity
 import Text.Parsec.Pos(newPos)
 
 import qualified Data.Map as M
-import Text.ParserCombinators.Parsec.Expr
+import qualified Data.Set as S
 
 -- | Fixity of infix operators
 data Fixity
@@ -42,9 +41,13 @@ findFixities (TIdent _ "infix" : TInt _ i : TSpec _ '`' : TIdent _ op : TSpec _ 
 findFixities (_:xs) = findFixities xs
 findFixities [] = M.empty
 
+data State =
+  State
+    { fixities :: Fixities }
+
 -- A parser must be able to read the fixities of the operators so it use an object of type
 -- @Fixities@ as a state, and a liist of token as an input stream
-type Parser = ParsecT [Token] Fixities Identity
+type Parser = ParsecT [Token] State Identity
 
 fixString :: String
 fixString =
@@ -58,7 +61,8 @@ fixString =
 testString :: String
 testString =
   unlines
-    [ "let "
+    [ ""
+    , "let "
     , "   y = let x = f (let a = 67 in a) 8 "
     , "       in (let { b = 3 `foo` 57 + -4 7 - -4 } "
     , " in b)"
@@ -66,8 +70,9 @@ testString =
     , ""]
 
 testParsed :: Either ParseError AST.Exp
-testParsed = runParser expr fixities "" (lexer testString)
+testParsed = runParser expr state "" (lexer testString)
   where
+    state = State{fixities}
     fixities = findFixities (lexer fixString)
 
 -- | Utility to parse a token
@@ -128,7 +133,7 @@ spec c = token go
 operator :: Parser String
 operator = token go1 <|> go2
   where
-    go1 (TOper _ o) = Just o
+    go1 (TOper _ o) | not (elem o ["->","<-","=>","::"]) = Just o
     go1 _ = Nothing
     go2 = do
       spec '`'
@@ -167,14 +172,62 @@ brackets p = do
   spec ']'
   return x
 
+typ :: Parser AST.Type
+typ = do
+  forallType
+  <|> ftype
+
+ftype :: Parser AST.Type
+ftype = do
+  arg <- btype
+  option arg $ do
+    reservedOp "->"
+    res <- typ
+    return (AST.Arrow arg res)
+
+btype :: Parser AST.Type
+btype = do
+  atype
+  -- atypes <- many1 atype
+  -- return (go atypes)
+  --   where
+  --     go [t] = t
+  --     go (t:ts) = AST.Arrow t (go ts)
+  --     go [] = error "a btype must have at least one atype"
+
+atype :: Parser AST.Type
+atype = do
+  varType
+  <|> parens typ
+
+forallType :: Parser AST.Type
+forallType = do
+  keyword "forall"
+  idents <- many1 identifier
+  spec '.'
+  ty <- typ
+  return (AST.Forall (AST.BoundTv <$> idents) ty)
+
+varType :: Parser AST.Type
+varType = do
+  ident <- identifier
+  if ident == "int"
+  then return AST.TInt
+  else return (AST.TVar $ AST.BoundTv ident)
+
 expr :: Parser AST.Exp
-expr = infixexp
+expr = do
+  ret <- infixexp
+  option ret $ do
+    reservedOp "::"
+    ty <- typ
+    return (AST.Annot ret ty)
 
 infixexp :: Parser AST.Exp
 infixexp = do
   list <- many go
-  fixities <- getState
-  case resolveFixities fixities list of
+  state <- getState
+  case resolveFixities (fixities state) list of
     Just e -> pure e
     Nothing -> fail ""
   where
@@ -183,6 +236,7 @@ infixexp = do
 lexp :: Parser AST.Exp
 lexp = do
   lambdaExp
+  <|> caseExp
   <|> ifExp
   <|> fexp
 
@@ -193,7 +247,7 @@ fexp = do
   list <- many1 aexp
   case list of
     hd : [] -> return hd
-    hd : tl -> return (AST.EApply hd tl)
+    hd : tl -> return (AST.Apply hd tl)
     _ -> error ""
 
 aexp :: Parser AST.Exp
@@ -204,10 +258,10 @@ aexp =
   <|> parens expr
 
 identExp :: Parser AST.Exp
-identExp = AST.EVar <$> identifier
+identExp = AST.Var <$> identifier
 
 litExp :: Parser AST.Exp
-litExp = AST.ELit <$> integer
+litExp = AST.Lit . AST.Int <$> integer
 
 lambdaExp :: Parser AST.Exp
 lambdaExp = do
@@ -215,10 +269,18 @@ lambdaExp = do
   args <- many1 identifier
   reservedOp "->"
   body <- expr
-  return (AST.ELambda args body)
+  return (AST.Lambda args body)
+
+caseExp = do
+  keyword "case"
+  e <- expr
+  keyword "of"
+  braces $ do
+    fail ""
 
 letExp :: Parser AST.Exp
 letExp = do
+  -- TODO: add multiple definitions in let-in expressions
   keyword "let"
   spec '{'
   fn <- identifier
@@ -229,8 +291,8 @@ letExp = do
   keyword "in"
   e2 <- expr
   if length args == 0
-  then return (AST.ELetIn fn e1 e2)
-  else return (AST.ELetIn fn (AST.ELambda args e1) e2)
+  then return (AST.LetIn fn e1 e2)
+  else return (AST.LetIn fn (AST.Lambda args e1) e2)
 
 ifExp :: Parser AST.Exp
 ifExp = do
@@ -242,7 +304,7 @@ ifExp = do
   option () (spec ';')
   keyword "else"
   e <- expr
-  return (AST.EIte i t e)
+  return (AST.Switch i [(AST.Int 0,e), (AST.Undefined, t)])
 
 
 -- | See https://www.haskell.org/onlinereport/haskell2010/haskellch10.html#x17-17800010.3
@@ -252,7 +314,7 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
     parseUnOp p f (Left e : rest) = parseBinOp p f e rest
     parseUnOp p1 f1 (Right "-" : rest) = do
       (r, rest') <- parseUnOp 6 FixLeft rest
-      parseBinOp p1 f1 (AST.EApply (AST.EVar "-") [r]) rest'
+      parseBinOp p1 f1 (AST.Apply (AST.Var "-") [r]) rest'
     parseUnOp _ _ _ = Nothing
 
     parseBinOp _ _ e [] = Just (e, [])
@@ -263,7 +325,7 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
         Just (e1, Right op2 : rest)
       | otherwise = do
         (r,rest') <- parseUnOp (prec op2) (fix op2) rest
-        parseBinOp p1 f1 (AST.EApply (AST.EVar op2) [e1,r]) rest'
+        parseBinOp p1 f1 (AST.Apply (AST.Var op2) [e1,r]) rest'
     parseBinOp _ _ _ _ = Nothing
 
     fix op =
@@ -275,3 +337,42 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
       case M.lookup op fixities of
         Just (p,_) -> p
         _ -> 8
+
+parseWhere :: Parser [(String, [String], AST.Exp)]
+parseWhere = do
+  keyword "where"
+  braces $ do
+    sepBy functionDeclaration (spec ';')
+
+functionAnnotation :: Parser (String, AST.Type)
+functionAnnotation = do
+  ident <- identifier
+  reservedOp "::"
+  ty <- typ
+  return (ident,ty)
+
+functionDeclaration :: Parser (String, [String], AST.Exp)
+functionDeclaration = do
+  ident <- identifier
+  args <- many identifier
+  reservedOp "="
+  body <- expr
+  w <- option [] parseWhere
+  return (ident, args, addLetIn w body)
+    where
+      -- TODO: add mutual recursion in where
+      addLetIn ((name,args,body):decls) e =
+        AST.LetIn name (AST.Lambda args body) (addLetIn decls e)
+      addLetIn [] e = e
+
+importParser :: Parser [String]
+importParser = many (keyword "import" >> identifier)
+
+program :: Parser AST.Decls
+program = do
+  keyword "module"
+  name <- constructor
+  keyword "where"
+  braces do
+
+    pure M.empty

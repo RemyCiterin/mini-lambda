@@ -6,6 +6,8 @@ import Backend
 import Lower
 import AST
 
+import qualified Typecheck
+
 import Lexer
 
 import Parser
@@ -30,7 +32,6 @@ test_program =
     , ""
     , "" ]
 
--- 100000 / 100000 / 22
 main_call :: String
 main_call =
   "#include <stdio.h>\n" ++
@@ -58,6 +59,7 @@ main_call =
 
 main :: IO ()
 main = do
+  Typecheck.test
   print (lexer Parse.testString)
   print Parse.testParsed
   --print $ (insertBraces $ lexerNoLayout (SLoc 1 1) test_program)

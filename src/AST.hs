@@ -7,7 +7,11 @@ module AST where
 import Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
-import Data.Data
+import Data.Generics.Uniplate
+
+import Data.IORef
+
+import Lexer(SLoc(..))
 
 -- | Identifier, their is no difference between qualified and unqualified identifiers yet
 type Id = String
@@ -17,51 +21,75 @@ type Id = String
 data Symbol
   = ConstructorExtract  -- ^ Extract a field of a constructor
   | ConstructorTest Id  -- ^ Test the tag of a constructor
+  | ConstructorTag      -- ^ Return the tag of a constructor
   | ConstructorMk Id    -- ^ Build a constructor
-  | Fun Id Int          -- ^ C function and the length of the arguments buffer
-  deriving(Eq, Show, Typeable, Data)
 
 -- | Expressions
 data Exp
-  = ELit Int            -- ^ Constant integer
-  | EVar Id             -- ^ Local variable or function call (before lowering)
-  | ESymbol Symbol      -- ^ Known global symbol (C function, constructor, destructor...)
-  | EIte Exp Exp Exp    -- ^ If Then Else
-  | EApply Exp [Exp]    -- ^ Function application
-  | ELetIn Id Exp Exp   -- ^ Local variable definition
-  | ELambda [Id] Exp    -- ^ Lambda abstraction
-  | EAnnot Exp Type     -- ^ Type annotation
-  deriving(Eq, Typeable, Data)
+  = Lit Lit                    -- ^ Constant integer
+  | Var Id                     -- ^ Local variable or function call (before lowering)
+  | Symbol Symbol              -- ^ Known global symbol (C function, constructor, destructor...)
+  | Switch Exp [(Lit, Exp)]    -- ^ switch (used to implement pattern matching and if-then-else)
+  | Apply Exp [Exp]            -- ^ Function application
+  | LetIn Id Exp Exp           -- ^ Local variable definition
+  | Lambda [Id] Exp            -- ^ Lambda abstraction
+  | Annot Exp Type             -- ^ Type annotation
+--   | Cons Id                    -- ^ Constructor
+--   | Case Exp [(Pattern, Exp)]  -- ^ Pattern matching
+
+data Pattern
+  = Wildcard
+  | Constructor Id [Pattern]
+  | PVar Id
+
+-- | Builtin expressions
+data Lit
+  = Int Int          -- ^ A fixed integer
+  | Tag String       -- ^ A constructor tag: of type integer
+  | CFun String Int  -- ^ A C function of a given arity
+  | Undefined        -- ^ An undefined object
 
 -- | General type
 type Sigma = Type
 
--- | Non top-level @TForall@ type
+-- | Non top-level @Forall@ type
 type Rho = Type
 
--- | A type without @TForall@
+-- | A type without @Forall@
 type Tau = Type
 
 -- | Types definition
 data Type
-  = TForAll [Id] Rho
+  = Forall [TVar] Rho
   -- ^ Type abstraction
-  | TFun Type Type
+  | Arrow Type Type
   -- ^ Type of functions
   | TInt
   -- ^ Integer type
-  deriving(Eq, Show, Typeable, Data)
+  | TVar TVar
+  -- ^ Type variable
+  | MVar MVar
+  -- ^ Meta type variable, created by the type checker
+
+data Kind
+  = Star
+  | KArrow Kind Kind
 
 -- | Type variables
-data TyVar
-  = BoundTv String
+data TVar
+  = BoundTv Id
   -- ^ A type variable bounded by a @Forall@
-  | SlokemTv String Uniq
+  | SkolemTv Id Uniq
   -- ^ A skolemised type variable, used to generate fresh type variables
-  deriving(Eq, Show, Typeable, Data)
 
 -- | Unique identifier of a slolemised variable
 type Uniq = Int
+
+-- | MetaType variable created by the type checker
+data MVar = Meta Uniq TyRef
+
+-- | Nothing means that the variable has not been substitued yet
+type TyRef = IORef (Maybe Tau)
 
 -- | A declaration is either a function declaration, or the declaration of a constructor of a given
 -- arity
@@ -73,6 +101,35 @@ data DeclBody
 
 -- | Map function names to expressions
 type Decls = M.Map Id DeclBody
+
+instance Eq MVar where
+  (Meta u1 _) == (Meta u2 _) = u1 == u2
+
+instance Eq TVar where
+  (BoundTv s1) == (BoundTv s2) = s1 == s2
+  (SkolemTv _ u1) == (SkolemTv _ u2) = u1 == u2
+  _ == _ = False
+
+instance Ord TVar where
+  (BoundTv s1) <= (BoundTv s2) = s1 <= s2
+  (SkolemTv _ u1) <= (SkolemTv _ u2) = u1 <= u2
+  (SkolemTv _ _) <= (BoundTv _) = True
+  _ <= _ = False
+
+(-->) :: Sigma -> Sigma -> Sigma
+arg --> res = Arrow arg res
+
+instance Show Lit where
+  show (CFun name _) = show name
+  show Undefined = "undefined"
+  show (Int i) = show i
+  show (Tag t) = t
+
+instance Show Symbol where
+  show (ConstructorMk c) = c
+  show (ConstructorTest c) = '?':c
+  show ConstructorExtract = "at"
+  show ConstructorTag = "tag"
 
 -- | Return @True@ if a function declaration is a function
 declIsFun :: DeclBody -> Bool
@@ -100,15 +157,30 @@ globalConsExtract = "extract_constructor"
 globalConsTag :: Id -> Id
 globalConsTag cons = "CONS_" ++ cons
 
+instance Uniplate Exp where
+  uniplate e@(Lit _) = ([], \ _ -> e)
+  uniplate e@(Var _) = ([], \ _ -> e)
+  uniplate e@(Symbol _) = ([], \ _ -> e)
+  uniplate (Lambda args e) = ([e], \ l -> Lambda args (l!!0))
+  uniplate (Apply f args) = (f:args, \ l -> Apply (l!!0) (drop 1 l))
+  uniplate (LetIn x e1 e2) = ([e1,e2], \ l -> LetIn x (l!!0) (l!!1))
+  uniplate (Annot e t) = ([e], \ l -> Annot (l!!0) t)
+  uniplate (Switch cond args) =
+    (cond:map snd args, \ l -> Switch (l!!0) (zip (map fst args) (drop 1 l)))
+
 instance Show Exp where
-  show (ELit i) = show i
-  show (EVar ident) = ident
-  show (ESymbol ident) = show ident
-  show (ELambda args e) = "( \\ " ++ concat (intersperse " " args) ++ " -> " ++ show e ++ ")"
-  show (EIte i t e) = "( if " ++ show i ++ " then " ++ show t ++ " else " ++ show e ++ ")"
-  show (EApply f args) = show f ++ "(" ++ concat (intersperse "," (map show args)) ++ ")"
-  show (ELetIn x e1 e2) = "( let " ++ x ++ " = " ++ show e1 ++ " in " ++ show e2 ++ ")"
-  show (EAnnot e t) = "( " ++ show e ++ " :: " ++ show t ++ " )"
+  show (Lit i) = show i
+  show (Var ident) = ident
+  show (Symbol ident) = show ident
+  show (Lambda args e) = "( \\ " ++ concat (intersperse " " args) ++ " -> " ++ show e ++ " )"
+  show (Switch i [(Int 1,t), (Undefined, e)]) =
+    "( if " ++ show i ++ " then " ++ show t ++ " else " ++ show e ++ " )"
+  show (Switch cond pairs) =
+    "(" ++ intercalate "; "
+      (map (\(val,body) -> show cond ++ " == " ++ show val ++ " -> " ++ show body) pairs) ++ ")"
+  show (Apply f args) = show f ++ "(" ++ concat (intersperse "," (map show args)) ++ ")"
+  show (LetIn x e1 e2) = "( let " ++ x ++ " = " ++ show e1 ++ " in " ++ show e2 ++ " )"
+  show (Annot e t) = "( " ++ show e ++ " :: " ++ show t ++ " )"
 
 instance Show DeclBody where
   show (FunDecl args body) = concat (intersperse " " args) ++ " = " ++ show body
@@ -116,29 +188,93 @@ instance Show DeclBody where
 
 -- | Return the free variables in an expression
 freeVars :: Exp -> S.Set Id
-freeVars (ELit _) = S.empty
-freeVars (EVar x) = S.singleton x
-freeVars (ESymbol _) = S.empty
-freeVars (EIte i t e) = S.union (freeVars i) (S.union (freeVars t) (freeVars e))
-freeVars (EApply fun (x:xs)) =
-  S.union (freeVars x) (freeVars (EApply fun xs))
-freeVars (EApply fun []) = freeVars fun
-freeVars (ELetIn x e1 e2) =
+freeVars (Lit _) = S.empty
+freeVars (Var x) = S.singleton x
+freeVars (Symbol _) = S.empty
+-- freeVars (Ite i t e) = S.union (freeVars i) (S.union (freeVars t) (freeVars e))
+freeVars (Switch cond []) = freeVars cond
+freeVars (Switch cond ((_,x):xs)) = S.union (freeVars x) (freeVars (Switch cond xs))
+freeVars (Apply fun (x:xs)) =
+  S.union (freeVars x) (freeVars (Apply fun xs))
+freeVars (Apply fun []) = freeVars fun
+freeVars (LetIn x e1 e2) =
   S.union (S.delete x (freeVars e1)) (S.delete x (freeVars e2))
-freeVars (ELambda [] e) = freeVars e
-freeVars (ELambda (x:xs) e) =
-  S.delete x (freeVars (ELambda xs e))
-freeVars (EAnnot e _) = freeVars e
+freeVars (Lambda [] e) = freeVars e
+freeVars (Lambda (x:xs) e) =
+  S.delete x (freeVars (Lambda xs e))
+freeVars (Annot e _) = freeVars e
 
 permute :: (M.Map Id Exp) -> Exp -> Exp
-permute _ e@(ELit _) = e
-permute m e@(EVar i) =
+permute _ e@(Lit _) = e
+permute m e@(Var i) =
   case M.lookup i m of
     Just v -> v
     _ -> e
-permute _ e@(ESymbol _) = e
-permute m (EIte i t e) = EIte (permute m i) (permute m t) (permute m e)
-permute m (EApply f a) = EApply (permute m f) (map (permute m) a)
-permute m (EAnnot e t) = EAnnot (permute m e) t
-permute m (ELambda xs e) = ELambda xs $ permute (foldr M.delete m xs) e
-permute m (ELetIn x e1 e2) = let m' = M.delete x m in ELetIn x (permute m' e1) (permute m' e2)
+permute _ e@(Symbol _) = e
+permute m (Switch c l) = Switch (permute m c) (map (\ (lit,val) -> (lit, permute m val)) l)
+permute m (Apply f a) = Apply (permute m f) (map (permute m) a)
+permute m (Annot e t) = Annot (permute m e) t
+permute m (Lambda xs e) = Lambda xs $ permute (foldr M.delete m xs) e
+permute m (LetIn x e1 e2) = let m' = M.delete x m in LetIn x (permute m' e1) (permute m' e2)
+
+
+freeMVars :: [Type] -> [MVar]
+freeMVars tys = foldr go [] tys
+  where
+    go (MVar tv) acc
+      | tv `elem` acc     = acc
+      | otherwise         = tv:acc
+    go (TVar _) acc      = acc
+    go TInt      acc      = acc
+    go (Arrow arg res) acc = go arg (go res acc)
+    go (Forall _ ty) acc = go ty acc
+
+freeTVars :: [Type] -> [TVar]
+freeTVars tys = foldr (go []) [] tys
+  where
+    go bound (TVar v) acc
+      | v `elem` bound            = acc
+      | v `elem` acc              = acc
+      | otherwise                 = v:acc
+    go _     TInt acc             = acc
+    go _     (MVar _) acc       = acc
+    go bound (Forall tvs ty) acc = go (tvs ++ bound) ty acc
+    go bound (Arrow arg res) acc   = go bound arg (go bound res acc)
+
+bindersTVar :: Rho -> [TVar]
+bindersTVar ty = nub (binders ty)
+  where
+    binders (Forall tvs body) = tvs ++ binders body
+    binders (Arrow arg res)     = binders arg ++ binders res
+    binders _                  = []
+
+type TyEnv = M.Map TVar Tau
+substitute :: TyEnv -> Type -> Type
+substitute env (Arrow arg res) = Arrow (substitute env arg) (substitute env res)
+substitute env (TVar v) =
+  case M.lookup v env of
+    Just x -> x
+    _ -> TVar v
+substitute env (Forall tys ty) = Forall tys (substitute (foldr M.delete env tys) ty)
+substitute _ t = t
+
+tyVarId :: TVar -> Id
+tyVarId (SkolemTv i _) = i
+tyVarId (BoundTv i) = i
+
+
+instance Show MVar where
+  show (Meta u _) = "?" ++ show u
+
+instance Show TVar where
+  show (BoundTv s) = s
+  show (SkolemTv s u) = s ++ "#" ++ show u
+
+instance Show Type where
+  show (Forall args body) = "forall " ++ intercalate " " (map show args) ++ ". " ++ show body
+  show (Arrow arg@(Forall _ _) res) = "(" ++ show arg ++ ") -> " ++ show res
+  show (Arrow arg@(Arrow _ _) res) = "(" ++ show arg ++ ") -> " ++ show res
+  show (Arrow arg res) = show arg ++ " -> " ++ show res
+  show (TVar tvar) = show tvar
+  show (MVar mvar) = show mvar
+  show TInt = "int"

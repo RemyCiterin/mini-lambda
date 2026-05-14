@@ -9,6 +9,7 @@ module Backend where
 
 import AST
 
+import GHC.Stack
 import qualified Data.Map as M
 import Data.List (intersperse)
 import Control.Monad
@@ -102,6 +103,7 @@ scope code = CGen (\ s1 i ->
 implementFun :: Id -> [Id] -> Exp -> CGen ()
 implementFun fun args body = do
   insert $ "// arity: "++show (length args)
+  insert $ unlines $ map ("//" ++) (lines (show body))
   insert $ "word_t "++fun++"(word_t* args)"
   scope $ do
     vars <- declareList (length args)
@@ -145,50 +147,61 @@ compileDecls decls = do
 
 -- | Compile an expression to C using an environment that map local variables to their names in the
 -- C file.
-compileExp :: (M.Map Id Id) -> Exp -> CGen String
-compileExp env (EVar v) = return (env M.! v)
-compileExp _ (ELit i) = do
+compileExp :: HasCallStack => (M.Map Id Id) -> Exp -> CGen String
+compileExp env (Var v) = return (env M.! v)
+compileExp _ (Lit (Int i)) = do
   var <- declareAs ("int_to_word("++show i++")")
   return var
 
-compileExp env (EAnnot e _) = compileExp env e
+compileExp _ (Lit (Tag i)) = do
+  var <- declareAs ("int_to_word("++show i++")")
+  return var
 
-compileExp _ (ELambda _ _) =
+compileExp _ (Lit Undefined) = do
+  var <- declare
+  return var
+
+compileExp env (Annot e _) = compileExp env e
+
+compileExp _ (Lambda _ _) =
   error "lambda are not supported at this stage of the compilation"
 
-compileExp _ (ESymbol (Fun f 0)) = do
+compileExp _ (Lit (CFun f 0)) = do
   var <- fresh
   insert $ "word_t "++var++" = "++f++"(NULL);"
   return var
 
-compileExp _ (ESymbol (ConstructorMk _)) =
+compileExp _ (Symbol (ConstructorMk _)) =
   error "constructors must be lower to C functions at this stage"
 
-compileExp _ (ESymbol ConstructorExtract) =
+compileExp _ (Symbol ConstructorExtract) =
   error "constructors must be lower to C functions at this stage"
 
-compileExp _ (ESymbol (ConstructorTest _)) =
+compileExp _ (Symbol ConstructorTag) =
   error "constructors must be lower to C functions at this stage"
 
-compileExp _ (ESymbol (Fun f n)) = do
+compileExp _ (Symbol (ConstructorTest _)) =
+  error "constructors must be lower to C functions at this stage"
+
+compileExp _ (Lit (CFun f n)) = do
   var <- declare
   assign var ("closure_to_word(make_closure((word_t)"++f++","++show n++",0))")
   return var
 
-compileExp env (ELetIn x e1 e2) = do
+compileExp env (LetIn x e1 e2) = do
   var <- compileExp env e1
   compileExp (M.insert x var env) e2
 
-compileExp env (EApply fun []) = compileExp env fun
+compileExp env (Apply fun []) = compileExp env fun
 
-compileExp env (EApply (ESymbol (Fun f n)) es) | n == length es = do
+compileExp env (Apply (Lit (CFun f n)) es) | n == length es = do
   vs <- mapM (compileExp env) es
   buf <- fresh
   insert $ "word_t "++buf++"["++show n++"] = { " ++ concat (intersperse "," vs) ++ " };"
   var <- declareAs $ f++"("++buf++")"
   return var
 
-compileExp env (EApply fun es) = do
+compileExp env (Apply fun es) = do
   let m = length es
   f <- compileExp env fun
   vs <- mapM (compileExp env) es
@@ -197,15 +210,23 @@ compileExp env (EApply fun es) = do
   var <- declareAs $ "apply_closure(word_to_closure("++f++"),"++buf++","++show m++")"
   return var
 
-compileExp env (EIte i_exp t_exp e_exp) = do
-  var_i <- compileExp env i_exp
+compileExp env (Switch cond list) = do
+  var_i <- compileExp env cond
   var <- declare
-  insert $ "if (word_to_int(" ++ var_i ++ "))"
+  insert $ "switch (word_to_int(" ++ var_i ++ "))"
   scope $ do
-    var_t <- compileExp env t_exp
-    assign var var_t
-  insert $ "else"
-  scope $ do
-    var_e <- compileExp env e_exp
-    assign var var_e
+    go var list
   return var
+    where
+      go var ((Undefined, expr):_) = do
+        insert $ "default:"
+        x <- compileExp env expr
+        assign var x
+        insert "break;"
+      go var ((lit, expr):others) = do
+        insert $ "case " ++ show lit ++":"
+        x <- compileExp env expr
+        assign var x
+        insert "break;"
+        go var others
+      go _ [] = pure ()

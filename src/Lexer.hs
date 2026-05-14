@@ -55,7 +55,7 @@ instance Show Token where
 
 -- Increment the line of a source location
 incrLine :: SLoc -> SLoc
-incrLine (SLoc l _) = SLoc (l+1) 0
+incrLine (SLoc l _) = SLoc (l+1) 1
 
 -- Increment the column of a source location
 incrCol :: SLoc -> SLoc
@@ -211,4 +211,6 @@ layout []               _                      = [TError (SLoc (-1) 0) "layout e
 
 -- | Lexing of a program
 lexer :: String -> [Token]
-lexer program = layout (insertBraces $ lexerNoLayout (SLoc 1 1) program) []
+lexer program = layout (lexed) []
+  where
+    lexed = insertBraces $ lexerNoLayout (SLoc 1 1) program

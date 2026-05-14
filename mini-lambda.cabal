@@ -72,12 +72,14 @@ executable mini-lambda
       Lower
       Lexer
       Parse
+      Typecheck
 
     -- LANGUAGE extensions used by modules in this package.
     default-extensions:
       BlockArguments
       DuplicateRecordFields
       DeriveDataTypeable
+      NamedFieldPuns
 
     -- Other library packages from which modules are imported.
     build-depends:

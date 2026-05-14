@@ -2,7 +2,6 @@ module Parser where
 
 import AST
 import Data.Char
-import Control.Monad
 import qualified Data.Map as M
 import Control.Applicative ((<|>), many)
 import Text.ParserCombinators.Parsec.Expr
@@ -28,14 +27,14 @@ tokenParser = T.makeTokenParser $ emptyDef
 identifier :: Parser String
 identifier = do
   ident <- T.identifier tokenParser
-  if isLower (head ident)
+  if isLower (ident!!0)
   then return ident
   else fail ""
 
 constructor :: Parser String
 constructor = do
   ident <- T.identifier tokenParser
-  if isUpper (head ident)
+  if isUpper (ident!!0)
   then return ident
   else fail ""
 
@@ -111,14 +110,14 @@ expBinOp op assoc = flip Infix assoc $ do
   reservedOp op
   return apply2
   where
-    apply2 a b = EApply (ESymbol (Fun (binOpTable M.! op) 2)) [a,b]
+    apply2 a b = Apply (Lit (CFun (binOpTable M.! op) 2)) [a,b]
 
 expUnOp :: String -> Operator Char () Exp
 expUnOp op = Prefix $ do
   reservedOp op
   return apply1
   where
-    apply1 a = EApply (ESymbol (Fun (unOpTable M.! op) 1)) [a]
+    apply1 a = Apply (Lit (CFun (unOpTable M.! op) 1)) [a]
 
 opTable :: [[Operator Char () Exp]]
 opTable =
@@ -145,6 +144,7 @@ expr1 =
   <|> try appExpr
   <|> try consExpr
   <|> try testConsExpr
+  <|> try tagConsExpr
   <|> try intExpr
   <|> try beginExpr
   <|> try (parens expr)
@@ -167,9 +167,9 @@ letExpr = do
   e2 <- expr
   case args of
     [] ->
-      return (ELetIn ident e1 e2)
+      return (LetIn ident e1 e2)
     _:_ ->
-      return (ELetIn ident (ELambda args e1) e2)
+      return (LetIn ident (Lambda args e1) e2)
 
 iteExpr :: Parser Exp
 iteExpr = do
@@ -179,7 +179,7 @@ iteExpr = do
   t <- expr
   reserved "else"
   e <- expr
-  return (EIte i t e)
+  return (Switch i [(Int 0,e),(Undefined,t)])
 
 lambdaExpr :: Parser Exp
 lambdaExpr = do
@@ -187,43 +187,47 @@ lambdaExpr = do
   idents <- sepBy identifier whitespace
   reservedOp "->"
   e <- expr
-  return (ELambda idents e)
+  return (Lambda idents e)
 
 intExpr :: Parser Exp
 intExpr = do
   i <- integer
-  return (ELit (fromInteger i))
+  return (Lit (Int (fromInteger i)))
 
 consExpr :: Parser Exp
 consExpr = do
   x <- constructor
   opt <- optionMaybe (parens (sepBy expr comma))
   case opt of
-    Just exprs -> return (EApply (ESymbol (ConstructorMk x)) exprs)
-    Nothing -> return (ESymbol (ConstructorMk x))
-    --Just exprs -> return (EApply (ESymbol (globalConsFn x) (length exprs)) exprs)
-    --Nothing -> return (ESymbol x 0)
+    Just exprs -> return (Apply (Symbol (ConstructorMk x)) exprs)
+    Nothing -> return (Symbol (ConstructorMk x))
 
 testConsExpr :: Parser Exp
 testConsExpr = do
   reservedOp "?"
   x <- constructor
   e <- parens expr
-  return (EApply (ESymbol (ConstructorTest x)) [e])
+  return (Apply (Symbol (ConstructorTest x)) [e])
+
+tagConsExpr :: Parser Exp
+tagConsExpr = do
+  reservedOp "?"
+  x <- parens expr
+  return (Apply (Symbol ConstructorTag) [x])
 
 extractConsExpr :: Parser Exp
 extractConsExpr = do
   e <- identifier
   i <- brackets integer
-  return (EApply (ESymbol ConstructorExtract) [(EVar e), ELit (fromInteger i)])
+  return (Apply (Symbol ConstructorExtract) [(Var e), Lit (Int (fromInteger i))])
 
 appExpr :: Parser Exp
 appExpr = do
   x <- identifier
   opt <- optionMaybe (parens (sepBy expr comma))
   case opt of
-    Just exprs -> return (EApply (EVar x) exprs)
-    Nothing -> return (EVar x)
+    Just exprs -> return (Apply (Var x) exprs)
+    Nothing -> return (Var x)
 
 functionDeclaration :: Parser (Id, DeclBody)
 functionDeclaration = do

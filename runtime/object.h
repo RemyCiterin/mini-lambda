@@ -125,8 +125,8 @@ inline bool test_constructor(word_t arg, unsigned tag) {
   return word_to_int(obj->tag) == tag;
 }
 
-inline unsigned constructor_tag(word_t constructor) {
-  constructor_t* obj = word_to_constructor(constructor);
+inline unsigned tag_constructor(word_t *args) {
+  constructor_t* obj = word_to_constructor(args[0]);
   return obj->tag;
 }
 
