@@ -72,6 +72,7 @@ incrTab (SLoc l c) = SLoc l (c+4)
 
 -- Add an indentation annotation at the begining of a list of tokens
 addIndent :: [Token] -> [Token]
+addIndent l@(TIndent _:_) = l
 addIndent (x:xs) = TIndent (tokenSLoc x) : x : xs
 addIndent [] = []
 

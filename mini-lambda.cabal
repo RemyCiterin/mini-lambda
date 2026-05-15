@@ -68,7 +68,6 @@ executable mini-lambda
     other-modules:
       AST
       Backend
-      Parser
       Lower
       Lexer
       Parse
@@ -87,6 +86,7 @@ executable mini-lambda
       containers,
       parsec,
       uniplate,
+      pretty,
       mtl
 
     -- Directories containing source files.

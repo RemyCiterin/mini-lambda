@@ -12,6 +12,7 @@ module Lower(lowerDecls) where
 
 import AST
 import Control.Monad
+import qualified Data.List
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Generics.Uniplate
@@ -21,28 +22,25 @@ import Data.Generics.Uniplate
 createFunNodes :: Decls -> Exp -> Exp
 createFunNodes = go
   where
-    go decls (Symbol (ConstructorMk cons)) =
-      case decls M.! cons of
-        ConstructorDecl arity -> Lit (CFun (globalConsFn cons) arity)
-        _ -> error "createFunNodes"
-    go _ (Symbol (ConstructorTest cons)) =
-      Lit (CFun (globalConsTest cons) 1)
-    go _ (Symbol ConstructorTag) =
-      Lit (CFun "tag_constructor" 1)
-    go _ (Symbol ConstructorExtract) =
-      Lit (CFun "extract_constructor" 2)
     go decls (Var v) =
      case M.lookup v decls of
-       Just (FunDecl args _) -> Lit (CFun ("fn_"++v) (length args))
+       Just (FunDecl args _) -> Lit (CFun (generateCName v) (length args))
        Just (ConstructorDecl _) -> error "createFunNodes"
        Nothing -> Var v
+    go decls (Lit (Cons name)) =
+      case M.lookup name decls of
+        Just (ConstructorDecl arity) -> Lit (CFun (globalConsFn name) arity)
+        _ -> error "createFunNodes"
     go decls (Lambda xs e) = Lambda xs (go (foldr M.delete decls xs) e)
     go decls (Apply f args) = Apply (go decls f) (map (go decls) args)
     go decls (LetIn x e1 e2) = let d = M.delete x decls in LetIn x (go d e1) (go d e2)
     go decls (Switch c l) = Switch (go decls c) (map (\ (a,b) -> (a,go decls b)) l)
     go decls (Annot e t) = Annot (go decls e) t
-    go _ (Symbol s) = Symbol s
+    go decls (Case e list) =
+      let reducedDecls pat = S.foldr M.delete decls (patternVars pat) in
+      Case (go decls e) (map (\(pat,val) -> (pat, go (reducedDecls pat) val)) list)
     go _ (Lit i) = Lit i
+
 
 -- | Optimize nested lambda abstractions and applications
 simplifyLambdas :: Exp -> Exp
@@ -102,13 +100,26 @@ lowerExp expr = transformM go1 expr >>= transformM go2
       else pure $ Apply (Lit (CFun new_fun (length free + length args))) (map Var free)
     go2 e = return e
 
+
+-- | Remove all the top-level lambda abstractions and annotations like in @foo = (\ x -> x) ::
+-- Int->Int@, this allow to reduce the utilisation of closures
+removeTopLevelLambdas :: Decls -> Decls
+removeTopLevelLambdas decls =
+  fmap go decls
+    where
+      go (FunDecl args (Annot x _)) = go (FunDecl args x)
+      go (FunDecl args1 (Lambda args2 x)) = go (FunDecl (args1++args2) x)
+      go x = x
+
 -- | Perform all the previously explained optimisations and lowering phases on a set of global
 -- function declarations
 lowerDecls :: Decls -> Decls
-lowerDecls decls =
+lowerDecls decls' =
   let (closures, _, funs) = runClosures (go (M.toList decls)) M.empty 0 in
   M.union closures funs
   where
+    decls = removeTopLevelLambdas decls'
+
     go :: [(Id,DeclBody)] -> Closures Decls
     go [] = return M.empty
     go ((name, d@(ConstructorDecl _)):other_decls) = do
@@ -117,4 +128,4 @@ lowerDecls decls =
     go ((name, FunDecl args body):other_decls) = do
       new_decls <- go other_decls
       new_body <- lowerExp (simplifyLambdas (createFunNodes decls body))
-      return $ M.insert ("fn_"++name) (FunDecl args (simplifyLambdas new_body)) new_decls
+      return $ M.insert (generateCName name) (FunDecl args (simplifyLambdas new_body)) new_decls

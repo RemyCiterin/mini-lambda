@@ -9,6 +9,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Generics.Uniplate
 
+import Prelude hiding((<>))
+import Text.PrettyPrint
+
 import Data.IORef
 
 import Lexer(SLoc(..))
@@ -16,31 +19,22 @@ import Lexer(SLoc(..))
 -- | Identifier, their is no difference between qualified and unqualified identifiers yet
 type Id = String
 
--- | Symbols and global variables are used to represent pointers to C functions and ADT related
--- functions (constructors/destructors)
-data Symbol
-  = ConstructorExtract  -- ^ Extract a field of a constructor
-  | ConstructorTest Id  -- ^ Test the tag of a constructor
-  | ConstructorTag      -- ^ Return the tag of a constructor
-  | ConstructorMk Id    -- ^ Build a constructor
-
 -- | Expressions
 data Exp
   = Lit Lit                    -- ^ Constant integer
   | Var Id                     -- ^ Local variable or function call (before lowering)
-  | Symbol Symbol              -- ^ Known global symbol (C function, constructor, destructor...)
   | Switch Exp [(Lit, Exp)]    -- ^ switch (used to implement pattern matching and if-then-else)
   | Apply Exp [Exp]            -- ^ Function application
   | LetIn Id Exp Exp           -- ^ Local variable definition
   | Lambda [Id] Exp            -- ^ Lambda abstraction
   | Annot Exp Type             -- ^ Type annotation
---   | Cons Id                    -- ^ Constructor
---   | Case Exp [(Pattern, Exp)]  -- ^ Pattern matching
+  | Case Exp [(Pattern, Exp)]  -- ^ Pattern matching
 
 data Pattern
   = Wildcard
-  | Constructor Id [Pattern]
+  | PCons Id [Pattern]
   | PVar Id
+  deriving (Eq, Ord)
 
 -- | Builtin expressions
 data Lit
@@ -48,6 +42,7 @@ data Lit
   | Tag String       -- ^ A constructor tag: of type integer
   | CFun String Int  -- ^ A C function of a given arity
   | Undefined        -- ^ An undefined object
+  | Cons Id          -- ^ A type constructor
 
 -- | General type
 type Sigma = Type
@@ -121,15 +116,15 @@ arg --> res = Arrow arg res
 
 instance Show Lit where
   show (CFun name _) = show name
+  show (Cons name) = show name
   show Undefined = "undefined"
   show (Int i) = show i
   show (Tag t) = t
 
-instance Show Symbol where
-  show (ConstructorMk c) = c
-  show (ConstructorTest c) = '?':c
-  show ConstructorExtract = "at"
-  show ConstructorTag = "tag"
+instance Show Pattern where
+  show Wildcard = "_"
+  show (PVar v) = v
+  show (PCons name args) = "(" ++ name ++ " " ++ intercalate " " (map show args) ++ ")"
 
 -- | Return @True@ if a function declaration is a function
 declIsFun :: DeclBody -> Bool
@@ -160,18 +155,19 @@ globalConsTag cons = "CONS_" ++ cons
 instance Uniplate Exp where
   uniplate e@(Lit _) = ([], \ _ -> e)
   uniplate e@(Var _) = ([], \ _ -> e)
-  uniplate e@(Symbol _) = ([], \ _ -> e)
   uniplate (Lambda args e) = ([e], \ l -> Lambda args (l!!0))
   uniplate (Apply f args) = (f:args, \ l -> Apply (l!!0) (drop 1 l))
   uniplate (LetIn x e1 e2) = ([e1,e2], \ l -> LetIn x (l!!0) (l!!1))
   uniplate (Annot e t) = ([e], \ l -> Annot (l!!0) t)
   uniplate (Switch cond args) =
     (cond:map snd args, \ l -> Switch (l!!0) (zip (map fst args) (drop 1 l)))
+  uniplate (Case val cases) =
+    (val:map snd cases, \ l -> Case (l!!0) (zip (map fst cases) (drop 1 l)))
+
 
 instance Show Exp where
   show (Lit i) = show i
   show (Var ident) = ident
-  show (Symbol ident) = show ident
   show (Lambda args e) = "( \\ " ++ concat (intersperse " " args) ++ " -> " ++ show e ++ " )"
   show (Switch i [(Int 1,t), (Undefined, e)]) =
     "( if " ++ show i ++ " then " ++ show t ++ " else " ++ show e ++ " )"
@@ -181,6 +177,7 @@ instance Show Exp where
   show (Apply f args) = show f ++ "(" ++ concat (intersperse "," (map show args)) ++ ")"
   show (LetIn x e1 e2) = "( let " ++ x ++ " = " ++ show e1 ++ " in " ++ show e2 ++ " )"
   show (Annot e t) = "( " ++ show e ++ " :: " ++ show t ++ " )"
+  show (Case _ _) = "cases"
 
 instance Show DeclBody where
   show (FunDecl args body) = concat (intersperse " " args) ++ " = " ++ show body
@@ -190,8 +187,6 @@ instance Show DeclBody where
 freeVars :: Exp -> S.Set Id
 freeVars (Lit _) = S.empty
 freeVars (Var x) = S.singleton x
-freeVars (Symbol _) = S.empty
--- freeVars (Ite i t e) = S.union (freeVars i) (S.union (freeVars t) (freeVars e))
 freeVars (Switch cond []) = freeVars cond
 freeVars (Switch cond ((_,x):xs)) = S.union (freeVars x) (freeVars (Switch cond xs))
 freeVars (Apply fun (x:xs)) =
@@ -203,6 +198,15 @@ freeVars (Lambda [] e) = freeVars e
 freeVars (Lambda (x:xs) e) =
   S.delete x (freeVars (Lambda xs e))
 freeVars (Annot e _) = freeVars e
+freeVars (Case e ((pat,val):patterns)) =
+  S.union (S.difference (freeVars val) (patternVars pat)) (freeVars (Case e patterns))
+freeVars (Case e []) = freeVars e
+
+
+patternVars :: Pattern -> S.Set Id
+patternVars Wildcard = S.empty
+patternVars (PVar v) = S.singleton v
+patternVars (PCons _ args) = foldr S.union S.empty (map patternVars args)
 
 permute :: (M.Map Id Exp) -> Exp -> Exp
 permute _ e@(Lit _) = e
@@ -210,13 +214,15 @@ permute m e@(Var i) =
   case M.lookup i m of
     Just v -> v
     _ -> e
-permute _ e@(Symbol _) = e
 permute m (Switch c l) = Switch (permute m c) (map (\ (lit,val) -> (lit, permute m val)) l)
 permute m (Apply f a) = Apply (permute m f) (map (permute m) a)
 permute m (Annot e t) = Annot (permute m e) t
 permute m (Lambda xs e) = Lambda xs $ permute (foldr M.delete m xs) e
 permute m (LetIn x e1 e2) = let m' = M.delete x m in LetIn x (permute m' e1) (permute m' e2)
-
+permute m (Case e list) =
+  Case (permute m e) (map (\ (pat,val) -> (pat, permute (reducedMap pat) val)) list)
+    where
+      reducedMap pat = (S.foldr M.delete m (patternVars pat))
 
 freeMVars :: [Type] -> [MVar]
 freeMVars tys = foldr go [] tys
@@ -262,7 +268,6 @@ tyVarId :: TVar -> Id
 tyVarId (SkolemTv i _) = i
 tyVarId (BoundTv i) = i
 
-
 instance Show MVar where
   show (Meta u _) = "?" ++ show u
 
@@ -278,3 +283,33 @@ instance Show Type where
   show (TVar tvar) = show tvar
   show (MVar mvar) = show mvar
   show TInt = "int"
+
+class Displayable a where
+  display :: a -> Doc
+
+-- | Replace characters "@\=+-!:<>.^#$*%/|&~?" by fixed strings
+generateCName :: String -> String
+generateCName name =
+  "fn_" ++ concat (map go name)
+    where
+      go '@' = "__a__"
+      go '\\' = "__b__"
+      go '=' = "__eq__"
+      go '+' = "__plus__"
+      go '-' = "__minus__"
+      go '!' = "__not__"
+      go ':' = "__dc__"
+      go '<' = "__lt__"
+      go '>' = "__gt__"
+      go '.' = "__dot__"
+      go '^' = "__xor__"
+      go '#' = "__dash__"
+      go '$' = "__dolar__"
+      go '*' = "__mul__"
+      go '%' = "__mod__"
+      go '/' = "__div__"
+      go '|' = "__bar__"
+      go '&' = "__and__"
+      go '~' = "__tilde__"
+      go '?' = "__question__"
+      go c = [c]

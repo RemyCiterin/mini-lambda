@@ -290,7 +290,6 @@ typecheckRho (LetIn var e1 e2) expected = do
   meta <- MVar <$> newMVar
   var_type <- envScope var meta (inferSigma e1)
   envScope var var_type (typecheckRho e2 expected)
-typecheckRho (Symbol _) _ = fail "Symbol typecheck not implemented yet"
 
 -- | Infer the type of an expression as a sigma type: quantify over all the meta-variables of the
 -- expression (except the mvars from the environment)

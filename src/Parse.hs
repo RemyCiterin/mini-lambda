@@ -4,6 +4,7 @@ import Lexer
 import qualified AST
 
 import Data.Char
+import Data.List
 
 import Text.Parsec hiding(token,State)
 import qualified Text.Parsec
@@ -48,32 +49,6 @@ data State =
 -- A parser must be able to read the fixities of the operators so it use an object of type
 -- @Fixities@ as a state, and a liist of token as an input stream
 type Parser = ParsecT [Token] State Identity
-
-fixString :: String
-fixString =
-  unlines
-    [ "infixl 6 +"
-    , "infixl 7 *"
-    , "infixl 6 -"
-    , ""
-    , ""]
-
-testString :: String
-testString =
-  unlines
-    [ ""
-    , "let "
-    , "   y = let x = f (let a = 67 in a) 8 "
-    , "       in (let { b = 3 `foo` 57 + -4 7 - -4 } "
-    , " in b)"
-    , "in 7"
-    , ""]
-
-testParsed :: Either ParseError AST.Exp
-testParsed = runParser expr state "" (lexer testString)
-  where
-    state = State{fixities}
-    fixities = findFixities (lexer fixString)
 
 -- | Utility to parse a token
 token :: (Token -> Maybe a) -> Parser a
@@ -271,19 +246,43 @@ lambdaExp = do
   body <- expr
   return (AST.Lambda args body)
 
+pattern :: Parser AST.Pattern
+pattern = p0
+  where
+    p0 =
+      consPat
+      <|> p1
+    p1 =
+      wildcard
+      <|> varPat
+      <|> parens p0
+    wildcard = reservedOp "_" >> pure AST.Wildcard
+    varPat = AST.PVar <$> identifier
+    consPat = do
+      c <- constructor
+      pats <- many p1
+      return (AST.PCons c pats)
+
+caseExp :: Parser AST.Exp
 caseExp = do
   keyword "case"
   e <- expr
   keyword "of"
-  braces $ do
-    fail ""
+  list <- braces (sepBy (pattern_and_expr) (spec ';'))
+  return (AST.Case e list)
+  where
+    pattern_and_expr = do
+      p <- pattern
+      reservedOp "->"
+      e <- expr
+      return (p,e)
 
 letExp :: Parser AST.Exp
 letExp = do
   -- TODO: add multiple definitions in let-in expressions
   keyword "let"
   spec '{'
-  fn <- identifier
+  fn <- identifier <|> parens operator
   let args = [] --args <- many identifier
   spec '='
   e1 <- expr
@@ -314,7 +313,7 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
     parseUnOp p f (Left e : rest) = parseBinOp p f e rest
     parseUnOp p1 f1 (Right "-" : rest) = do
       (r, rest') <- parseUnOp 6 FixLeft rest
-      parseBinOp p1 f1 (AST.Apply (AST.Var "-") [r]) rest'
+      parseBinOp p1 f1 (AST.Apply (AST.Var "-") [AST.Lit (AST.Int 0), r]) rest'
     parseUnOp _ _ _ = Nothing
 
     parseBinOp _ _ e [] = Just (e, [])
@@ -336,7 +335,7 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
     prec op =
       case M.lookup op fixities of
         Just (p,_) -> p
-        _ -> 8
+        _ -> 1
 
 parseWhere :: Parser [(String, [String], AST.Exp)]
 parseWhere = do
@@ -346,16 +345,16 @@ parseWhere = do
 
 functionAnnotation :: Parser (String, AST.Type)
 functionAnnotation = do
-  ident <- identifier
+  ident <- identifier <|> parens operator
   reservedOp "::"
   ty <- typ
   return (ident,ty)
 
 functionDeclaration :: Parser (String, [String], AST.Exp)
 functionDeclaration = do
-  ident <- identifier
+  ident <- identifier <|> parens operator
   args <- many identifier
-  reservedOp "="
+  spec '='
   body <- expr
   w <- option [] parseWhere
   return (ident, args, addLetIn w body)
@@ -365,14 +364,48 @@ functionDeclaration = do
         AST.LetIn name (AST.Lambda args body) (addLetIn decls e)
       addLetIn [] e = e
 
+foreignDeclaration :: Parser (String, AST.Exp)
+foreignDeclaration = do
+  keyword "foreign"
+  name <- identifier <|> parens operator
+  reservedOp "::"
+  ty <- typ
+  let args = take (arity ty) (["a"++show i | i <- [0..]] Data.List.\\ [name])
+  let lit = AST.Lit (AST.CFun name (arity ty))
+  return $
+    (name, AST.Annot
+     (AST.Lambda args (AST.Apply lit (AST.Var <$> args)))
+     ty )
+  where
+    arity (AST.Arrow _ t) = 1+arity t
+    arity (AST.Forall _ t) = arity t
+    arity _ = 0
+
 importParser :: Parser [String]
 importParser = many (keyword "import" >> identifier)
+
+globalDecl :: Parser [(String, AST.DeclBody)]
+globalDecl =
+  parse_infixl
+  <|> parse_infixr
+  <|> parse_infix
+  <|> parse_fundecl
+  <|> parse_foreign
+    where
+      parse_infixl = keyword "infixl" >> integer >> operator >> pure []
+      parse_infixr = keyword "infixr" >> integer >> operator >> pure []
+      parse_infix = keyword "infix" >> integer >> operator >> pure []
+      parse_fundecl = do
+        (name,args,body) <- functionDeclaration
+        pure [(name,AST.FunDecl args body)]
+      parse_foreign = do
+        (name,body) <- foreignDeclaration
+        pure [(name,AST.FunDecl [] body)]
 
 program :: Parser AST.Decls
 program = do
   keyword "module"
-  name <- constructor
+  _ <- constructor
   keyword "where"
-  braces do
-
-    pure M.empty
+  decls <- braces (sepBy globalDecl (spec ';'))
+  return $ M.fromList $ concat decls

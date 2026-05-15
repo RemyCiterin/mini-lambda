@@ -8,7 +8,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-typedef size_t word_t;
+typedef intptr_t word_t;
 
 #define PTR_MASK 0b00 // Pointer
 #define HDR_MASK 0b10 // Header of an allocated object

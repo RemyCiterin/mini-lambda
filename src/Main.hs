@@ -7,30 +7,11 @@ import Lower
 import AST
 
 import qualified Typecheck
+import Text.Parsec(runParser)
 
 import Lexer
 
-import Parser
 import qualified Parse
-
-test_program =
-  unlines
-    [ "test x = do"
-    , "  let "
-    , "    a = 0o17_111110"
-    , "    b ="
-    , "      300"
-    , "  x = y"
-    , "  x <- 4"
-    , "where "
-    , " { y=2 }"
-    , "let x = do 42"
-    , "  where "
-    , "    y = 3"
-    , ""
-    , ""
-    , ""
-    , "" ]
 
 main_call :: String
 main_call =
@@ -60,16 +41,29 @@ main_call =
 main :: IO ()
 main = do
   Typecheck.test
-  print (lexer Parse.testString)
-  print Parse.testParsed
-  --print $ (insertBraces $ lexerNoLayout (SLoc 1 1) test_program)
-  --print $ lexer test_program
-  content <- lowerDecls <$> parseFile "test.lambda"
-  --print content
 
-  let (strings, _, _) = runCGen (compileDecls content) [] 0
+  file_content <- lexer <$> readFile "foo.hs"
+  print file_content
 
-  let file = concat (intersperse "\n" (reverse strings))
-  let file_with_header = "#include \"object.h\"\n\n" ++ file ++ main_call
+  let fixities = Parse.findFixities file_content
+  let parsed = runParser Parse.program Parse.State{fixities= fixities} "" file_content
+  print parsed
 
-  writeFile "runtime/program.c" file_with_header
+  case parsed of
+    Right program -> do
+      let low = lowerDecls program
+      let (strings,_,_) = runCGen (compileDecls low) [] 0
+      let file = concat (intersperse "\n" (reverse strings))
+      let file_with_header = "#include \"object.h\"\n\n" ++ file ++ main_call
+      writeFile "runtime/program.c" file_with_header
+    Left err -> do
+      print "FAILURE:"
+      print err
+
+  --content <- lowerDecls <$> parseFile "test.lambda"
+  --let (strings, _, _) = runCGen (compileDecls content) [] 0
+
+  --let file = concat (intersperse "\n" (reverse strings))
+  --let file_with_header = "#include \"object.h\"\n\n" ++ file ++ main_call
+
+  --writeFile "runtime/program.c" file_with_header
