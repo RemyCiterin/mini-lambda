@@ -135,7 +135,7 @@ compileDecls decls = do
   iterDecls \ name decl ->
     case decl of
       FunDecl _ _ -> insert $ "word_t "++name++"(word_t*);\n"
-      ConstructorDecl nargs -> implementCons name nargs
+      ConstructorDecl (Forall _ ty) -> implementCons name (nargs ty)
   iterDecls \ name decl ->
     case decl of
       FunDecl args body -> implementFun name args body
@@ -144,9 +144,15 @@ compileDecls decls = do
     iterDecls :: (Id -> DeclBody -> CGen ()) -> CGen ()
     iterDecls f = forM_ (M.toList decls) \ (name, decl) -> f name decl
 
+    nargs (Arrow _ t) = 1 + nargs t
+    nargs _ = 0
+
+-- | Environment from variable names to C local variables
+type CEnv = M.Map Id Id
+
 -- | Compile an expression to C using an environment that map local variables to their names in the
 -- C file.
-compileExp :: (M.Map Id Id) -> Exp -> CGen String
+compileExp :: CEnv -> Exp -> CGen String
 compileExp env (Var v) =
   case M.lookup v env of
     Just x -> return x
@@ -219,7 +225,7 @@ compileClosure :: String -> Int -> CGen String
 compileClosure f 0 = declareAs (f++"(NULL)")
 compileClosure f n = declareAs ("closure_to_word(make_closure((word_t)"++f++","++show n++",0))")
 
-compileFullApply :: M.Map Id Id -> String -> [Exp] -> CGen String
+compileFullApply :: CEnv -> String -> [Exp] -> CGen String
 compileFullApply env f es = do
   buf <- fresh
   vs <- mapM (compileExp env) es
@@ -227,58 +233,37 @@ compileFullApply env f es = do
   var <- declareAs $ f++"("++buf++")"
   return var
 
-compileCase :: M.Map Id Id -> Exp -> [(Pattern,Exp)] -> CGen String
-compileCase env expr cases = do
-  var <- compileExp env expr
-  tag <- declareAs ("word_to_int(tag_constructor(&"++ var ++"))")
+compileCase :: CEnv -> Exp -> [(Pattern,Exp)] -> CGen String
+compileCase = \ env expr cases -> do
+  goto <- fresh
   ret <- declare
-
-  insert $ "switch ("++tag++")"
-  scope do
-    go var ret cases
+  val <- compileExp env expr
+  forM_ cases $ \ (pattern,e) ->
+    let kont cenv = do
+            compileExp cenv e >>= assign ret
+            insert $ "goto " ++ goto ++ ";"
+    in go env kont [(pattern,val)]
+  insert $ goto++":"
   return ret
-    where
-      go _ _ [] = pure ()
-      go _ ret ((Wildcard,e):_) = do
-        insert "default:"
-        x <- compileExp env e
-        assign ret x
-      go var ret ((PVar v,e):_) = do
-        insert "default:"
-        x <- compileExp (M.insert v var env) e
-        assign ret x
-      go var ret ((PCons name args,e):xs) = do
-        insert $ "case " ++ globalConsTag name ++ ":"
-        patterns <- mapM (extract var) (zip args [0..])
-        compileCaseArm env patterns e ret
-        go var ret xs
-
-      extract :: Id -> (Pattern,Int) -> CGen (Pattern,Id)
-      extract var (pat,i) = do
-        buf <- fresh
-        insert $ "word_t "++buf++"[2] = { " ++ var ++ ",int_to_word(" ++ show i ++ ") };"
-        ret <- declareAs ("extract_constructor("++buf++")")
-        pure (pat,ret)
-
-
-compileCaseArm :: M.Map Id Id -> [(Pattern,Id)] -> Exp -> Id -> CGen ()
-compileCaseArm env [] expr res = do
-  x <- compileExp env expr
-  assign res x
-compileCaseArm env ((Wildcard,_):xs) expr res = do
-  compileCaseArm env xs expr res
-compileCaseArm env ((PVar v,e):xs) expr res = do
-  compileCaseArm (M.insert v e env) xs expr res
-compileCaseArm env ((PCons c l,e):xs) expr res = do
-  tag <- declareAs ("word_to_int(&tag_constructor("++ e ++"))")
-  insert $ "if (" ++ tag ++ " == " ++ globalConsTag c ++ ")"
-  scope do
-    patterns <- mapM (extract e) (zip l [0..])
-    compileCaseArm env (patterns ++ xs) expr res
   where
-    extract :: Id -> (Pattern,Int) -> CGen (Pattern,Id)
-    extract var (pat,i) = do
-      buf <- fresh
-      insert $ "word_t "++buf++"[2] = { " ++ var ++ ",int_to_word(" ++ show i ++ ") };"
-      ret <- declareAs ("extract_constructor("++buf++")")
-      pure (pat,ret)
+    go :: CEnv -> (CEnv -> CGen ()) -> [(Pattern,Id)] -> CGen ()
+    go env kont [] = kont env
+    go env kont ((Wildcard,_):xs) = go env kont xs
+    go env kont ((PVar v,i):xs) = go (M.insert v i env) kont xs
+
+    go env kont ((PInt i,j):xs) = do
+      val <- declareAs ("int_to_word("++show i++")")
+      insert $ "if ("++val++" == "++j++")"
+      scope do
+        go env kont xs
+
+    go env kont ((PCons cons args,name):xs) = do
+      tag <- declareAs ("word_to_int(tag_constructor(&"++ name ++"))")
+      insert $ "if ("++tag++" == "++globalConsTag cons++")"
+      scope do
+        new_constraints <- forM (zip args [0..]) \ (pat,i) -> do
+          buf <- fresh
+          insert $ "word_t "++buf++"[2] = { "++name++",int_to_word("++show i++") };"
+          ret <- declareAs ("extract_constructor("++buf++")")
+          return (pat,ret)
+        go env kont (new_constraints++xs)

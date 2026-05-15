@@ -69,6 +69,13 @@ identifier = token go
     go (TIdent _ s) = if elem s keywords then Nothing else Just s
     go _ = Nothing
 
+-- | Parse a wildcard @_@
+wildcard :: Parser ()
+wildcard = token go
+  where
+    go (TWildcard _) = Just ()
+    go _ = Nothing
+
 -- | Parse an identifier starting by a lower case, it can't be a keyword
 variable :: Parser String
 variable = token go
@@ -112,7 +119,7 @@ operator = token go1 <|> go2
     go1 _ = Nothing
     go2 = do
       spec '`'
-      i <- identifier
+      i <- variable
       spec '`'
       return i
 
@@ -149,8 +156,9 @@ brackets p = do
 
 typ :: Parser AST.Type
 typ = do
-  forallType
-  <|> ftype
+  -- forallType
+  -- <|> Forall [] <$> ftype
+  ftype
 
 ftype :: Parser AST.Type
 ftype = do
@@ -162,33 +170,36 @@ ftype = do
 
 btype :: Parser AST.Type
 btype = do
-  atype
-  -- atypes <- many1 atype
-  -- return (go atypes)
-  --   where
-  --     go [t] = t
-  --     go (t:ts) = AST.Arrow t (go ts)
-  --     go [] = error "a btype must have at least one atype"
+  atypes <- many1 atype
+  return (go atypes)
+    where
+      go [t] = t
+      go (t:ts) = AST.App t (go ts)
+      go [] = error "a btype must have at least one atype"
 
 atype :: Parser AST.Type
 atype = do
   varType
+  <|> consType
   <|> parens typ
 
-forallType :: Parser AST.Type
+forallType :: Parser AST.Scheme
 forallType = do
   keyword "forall"
-  idents <- many1 identifier
+  idents <- many1 variable
   spec '.'
   ty <- typ
   return (AST.Forall (AST.BoundTv <$> idents) ty)
 
 varType :: Parser AST.Type
 varType = do
-  ident <- identifier
-  if ident == "int"
-  then return AST.TInt
-  else return (AST.TVar $ AST.BoundTv ident)
+  ident <- variable
+  return (AST.TVar $ AST.BoundTv ident)
+
+consType :: Parser AST.Type
+consType = do
+  c <- constructor
+  return (AST.TConst c)
 
 expr :: Parser AST.Exp
 expr = do
@@ -228,12 +239,16 @@ fexp = do
 aexp :: Parser AST.Exp
 aexp =
   identExp
+  <|> consExp
   <|> letExp
   <|> litExp
   <|> parens expr
 
 identExp :: Parser AST.Exp
-identExp = AST.Var <$> identifier
+identExp = AST.Var <$> variable
+
+consExp :: Parser AST.Exp
+consExp = AST.Lit . AST.Cons <$> constructor
 
 litExp :: Parser AST.Exp
 litExp = AST.Lit . AST.Int <$> integer
@@ -241,7 +256,7 @@ litExp = AST.Lit . AST.Int <$> integer
 lambdaExp :: Parser AST.Exp
 lambdaExp = do
   spec '\\'
-  args <- many1 identifier
+  args <- many1 variable
   reservedOp "->"
   body <- expr
   return (AST.Lambda args body)
@@ -253,15 +268,19 @@ pattern = p0
       consPat
       <|> p1
     p1 =
-      wildcard
+      intPat
+      <|> wildcardPat
       <|> varPat
       <|> parens p0
-    wildcard = reservedOp "_" >> pure AST.Wildcard
-    varPat = AST.PVar <$> identifier
+    wildcardPat = wildcard >> pure AST.Wildcard
+    varPat = AST.PVar <$> variable
     consPat = do
       c <- constructor
       pats <- many p1
       return (AST.PCons c pats)
+    intPat = do
+      i <- integer
+      return (AST.PInt i)
 
 caseExp :: Parser AST.Exp
 caseExp = do
@@ -282,8 +301,8 @@ letExp = do
   -- TODO: add multiple definitions in let-in expressions
   keyword "let"
   spec '{'
-  fn <- identifier <|> parens operator
-  let args = [] --args <- many identifier
+  fn <- variable <|> parens operator
+  let args = [] --args <- many variable
   spec '='
   e1 <- expr
   spec '}'
@@ -337,6 +356,36 @@ resolveFixities fixities toks = fmap fst $ parseUnOp (-1) FixNone toks
         Just (p,_) -> p
         _ -> 1
 
+dataTypeParse :: Parser [(String, AST.DeclBody)]
+dataTypeParse = do
+  keyword "data"
+  ty_name <- AST.TConst <$> constructor
+  ty_vars <- map (AST.TVar . AST.BoundTv) <$> many variable
+  spec '='
+  sepBy (cons (apply ty_name ty_vars)) (spec '|')
+    where
+      apply :: AST.Type -> [AST.Type] -> AST.Type
+      apply f (x:xs) = apply (AST.App f x) xs
+      apply f [] = f
+
+      lambda :: [AST.Type] -> AST.Type -> AST.Type
+      lambda (x:xs) ret = lambda xs (AST.Arrow x ret)
+      lambda [] ret = ret
+
+      cons :: AST.Type -> Parser (String, AST.DeclBody)
+      cons res_ty = do
+        name <- constructor
+        types <- many atype
+        let free = AST.freeTVars [AST.Forall [] res_ty]
+        let tvars = AST.freeTVars [AST.Forall [] (lambda types res_ty)]
+
+        if length free == length tvars
+        then return (name, AST.ConstructorDecl (AST.Forall tvars $ lambda types res_ty))
+        else fail $
+          "the variables `" ++ intercalate " " (map show $ tvars \\ free) ++
+          "` are unbounded in the definition of the constructor `" ++ name ++ "`"
+
+
 parseWhere :: Parser [(String, [String], AST.Exp)]
 parseWhere = do
   keyword "where"
@@ -345,15 +394,15 @@ parseWhere = do
 
 functionAnnotation :: Parser (String, AST.Type)
 functionAnnotation = do
-  ident <- identifier <|> parens operator
+  ident <- variable <|> parens operator
   reservedOp "::"
   ty <- typ
   return (ident,ty)
 
 functionDeclaration :: Parser (String, [String], AST.Exp)
 functionDeclaration = do
-  ident <- identifier <|> parens operator
-  args <- many identifier
+  ident <- variable <|> parens operator
+  args <- many variable
   spec '='
   body <- expr
   w <- option [] parseWhere
@@ -367,7 +416,7 @@ functionDeclaration = do
 foreignDeclaration :: Parser (String, AST.Exp)
 foreignDeclaration = do
   keyword "foreign"
-  name <- identifier <|> parens operator
+  name <- variable <|> parens operator
   reservedOp "::"
   ty <- typ
   let args = take (arity ty) (["a"++show i | i <- [0..]] Data.List.\\ [name])
@@ -378,11 +427,10 @@ foreignDeclaration = do
      ty )
   where
     arity (AST.Arrow _ t) = 1+arity t
-    arity (AST.Forall _ t) = arity t
     arity _ = 0
 
 importParser :: Parser [String]
-importParser = many (keyword "import" >> identifier)
+importParser = many (keyword "import" >> variable)
 
 globalDecl :: Parser [(String, AST.DeclBody)]
 globalDecl =
@@ -391,6 +439,7 @@ globalDecl =
   <|> parse_infix
   <|> parse_fundecl
   <|> parse_foreign
+  <|> dataTypeParse
     where
       parse_infixl = keyword "infixl" >> integer >> operator >> pure []
       parse_infixr = keyword "infixr" >> integer >> operator >> pure []

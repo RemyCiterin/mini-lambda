@@ -3,7 +3,6 @@ module Foo where
 infixl 6 +
 infixl 6 -
 infixl 7 *
-
 infix 4 ==
 infix 4 /=
 infix 4 <
@@ -30,11 +29,13 @@ foreign int_or :: Int -> Int -> Int
 foreign int_bor :: Int -> Int -> Int
 foreign int_xor :: Int -> Int -> Int
 foreign int_div :: Int -> Int -> Int
+foreign int_mul :: Int -> Int -> Int
 foreign int_rem :: Int -> Int -> Int
 foreign int_bnot :: Int -> Int
 foreign int_not :: Int -> Int
 foreign int_neg :: Int -> Int
 
+(*) x y = int_mul x y
 (+) x y = int_add x y
 (-) x y = int_sub x y
 (<=) x y = int_leq x y
@@ -51,11 +52,47 @@ xor x y = int_xor x y
 rem x y = int_rem x y
 div x y = int_div x y
 
-not = int_not
-bitwiseNot = int_bnot
+not x = int_not x
+bitwiseNot x = int_bnot x
+
+data List a
+ = Nil
+ | Cons a (List a)
+
+cons a l = Cons a l
+nil = Nil
+
+map f list =
+  case list of
+    Cons a l -> Cons (f a) (map f l)
+    Nil -> Nil
+
+arange n = if n == 0 then Nil else Cons 0 (map (\ x -> x + 1) (arange (n-1)))
+
+sum list =
+  case list of
+    Cons a b -> a + sum b
+    Nil -> 0
+
+data Maybe a
+  = Just a
+  | Nothing
+
+option x =
+  case x of
+    Just (Just x) -> x
+    _ -> 0
+
+identity = \ x -> option (Just (Just x))
+
+facto x =
+  if x == 0 then 1 else x * facto (x-1)
 
 fibo x =
-  if x < 2 then x else fibo xm1 + fibo xm2
-    where
-      xm2 = x - 2
-      xm1 = x - 1
+  case x of
+    0 -> 0
+    1 -> 1
+    _ -> fibo xm1 + fibo xm2
+  where
+    xm2 = identity (x - 2)
+    xm1 = x - 1

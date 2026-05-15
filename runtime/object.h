@@ -115,6 +115,7 @@ inline constructor_t* make_constructor(unsigned tag, word_t* buf, word_t len) {
 
 
 inline word_t extract_constructor(word_t *args) {
+  assert(word_is_constructor(args[0]));
   constructor_t* obj = word_to_constructor(args[0]);
   return obj->buf[word_to_int(args[1])];
 }
@@ -126,6 +127,7 @@ inline bool test_constructor(word_t arg, unsigned tag) {
 }
 
 inline unsigned tag_constructor(word_t *args) {
+  assert(word_is_constructor(args[0]));
   constructor_t* obj = word_to_constructor(args[0]);
   return obj->tag;
 }

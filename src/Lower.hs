@@ -29,8 +29,11 @@ createFunNodes = go
        Nothing -> Var v
     go decls (Lit (Cons name)) =
       case M.lookup name decls of
-        Just (ConstructorDecl arity) -> Lit (CFun (globalConsFn name) arity)
+        Just (ConstructorDecl (Forall _ t)) -> Lit (CFun (globalConsFn name) (nargs t))
         _ -> error "createFunNodes"
+        where
+          nargs (Arrow _ t) = 1 + nargs t
+          nargs _ = 0
     go decls (Lambda xs e) = Lambda xs (go (foldr M.delete decls xs) e)
     go decls (Apply f args) = Apply (go decls f) (map (go decls) args)
     go decls (LetIn x e1 e2) = let d = M.delete x decls in LetIn x (go d e1) (go d e2)

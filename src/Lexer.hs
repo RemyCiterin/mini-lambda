@@ -27,6 +27,8 @@ data Token
   -- ^ Operator
   | TString  SLoc String
   -- ^ String
+  | TWildcard SLoc
+  -- ^ @_@ in patterns
   | TChar    SLoc Char
   -- ^ Character literal
   | TInt     SLoc Int
@@ -52,6 +54,7 @@ instance Show Token where
   show (TInt    _ i) = show i
   show (TSpec   _ s) = [s]
   show (TError  _ e) = "ERROR: " ++ e
+  show (TWildcard _) = "_"
 
 -- Increment the line of a source location
 incrLine :: SLoc -> SLoc
@@ -83,9 +86,10 @@ lexerNoLayout _ [] = []
 lexerNoLayout loc (' ':xs) = lexerNoLayout (incrCol loc) xs
 lexerNoLayout loc ('\t':xs) = lexerNoLayout (incrTab loc) xs
 lexerNoLayout loc ('\n':xs) = addIndent (lexerNoLayout (incrLine loc) xs)
-lexerNoLayout loc (x:xs) | isAlpha x =
+lexerNoLayout loc (x:xs) | isAlpha x || x == '_' =
   let (ident, rest) = span (\ y -> isAlphaNum y || y == '_') (x:xs) in
-  TIdent loc ident : lexerNoLayout (incrCols loc ident) rest
+  if ident == "_" then TWildcard loc : lexerNoLayout (incrCols loc ident) rest
+  else TIdent loc ident : lexerNoLayout (incrCols loc ident) rest
 lexerNoLayout loc ('-':'-':xs) = addIndent (lexerNoLayout (incrLine loc) (snd (span (/= '\n') xs)))
 lexerNoLayout loc (x:xs) | isSpec x = TSpec loc x : lexerNoLayout (incrCol loc) xs
 lexerNoLayout loc (x:(y:ys)) | isSpecAndOper x && not (isOper y) =
@@ -146,15 +150,16 @@ isOper c =
 
 -- | Return the begining location of a token
 tokenSLoc :: Token -> SLoc
-tokenSLoc (TIdent   l _) = l
-tokenSLoc (TOper    l _) = l
-tokenSLoc (TString  l _) = l
-tokenSLoc (TChar    l _) = l
-tokenSLoc (TInt     l _) = l
-tokenSLoc (TSpec    l _) = l
-tokenSLoc (TError   l _) = l
-tokenSLoc (TBrace   l)   = l
-tokenSLoc (TIndent  l)   = l
+tokenSLoc (TIdent    l _) = l
+tokenSLoc (TOper     l _) = l
+tokenSLoc (TString   l _) = l
+tokenSLoc (TChar     l _) = l
+tokenSLoc (TInt      l _) = l
+tokenSLoc (TSpec     l _) = l
+tokenSLoc (TError    l _) = l
+tokenSLoc (TWildcard l)  = l
+tokenSLoc (TBrace    l)   = l
+tokenSLoc (TIndent   l)   = l
 
 -- | Return if an identifier need to be followed by a brace
 needBrace :: String -> Bool

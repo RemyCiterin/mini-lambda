@@ -13,7 +13,7 @@ import Data.IORef
 data TCEnv =
   TCEnv
     { unique :: IORef Uniq
-    , var_env :: M.Map Id Sigma }
+    , var_env :: M.Map Id Scheme }
 
 data TC a = TC { unTC :: TCEnv -> IO (Either String a) }
 
@@ -43,7 +43,7 @@ check :: Bool -> String -> TC ()
 check True _ = pure ()
 check False s = fail s
 
-runTC :: [(Id, Sigma)] -> TC a -> IO (Either String a)
+runTC :: [(Id, Scheme)] -> TC a -> IO (Either String a)
 runTC bindings TC{unTC=tc} = do
   ref <- newIORef 0
   let env = TCEnv { unique= ref, var_env= M.fromList bindings }
@@ -56,13 +56,13 @@ lift io = TC{unTC= \ _ -> Right <$> io}
   -- Read/upadte environment state
 ---------------------------------------------------------------------------------------------------
 
-envScope :: Id -> Sigma -> TC a -> TC a
+envScope :: Id -> Scheme -> TC a -> TC a
 envScope var ty TC{unTC=tc} = TC{unTC= \ env -> tc env{var_env= M.insert var ty (var_env env)}}
 
-getEnv :: TC (M.Map Id Sigma)
+getEnv :: TC (M.Map Id Scheme)
 getEnv = TC {unTC= \env -> pure (Right (var_env env))}
 
-lookupVar :: Id -> TC Sigma
+lookupVar :: Id -> TC Scheme
 lookupVar var = do
   env <- getEnv
   case M.lookup var env of
@@ -81,10 +81,10 @@ newUnique =
   -- Read/write meta variable states
 ---------------------------------------------------------------------------------------------------
 
-readMVar :: MVar -> TC (Maybe Tau)
+readMVar :: MVar -> TC (Maybe Type)
 readMVar (Meta _ ref) = lift (readIORef ref)
 
-writeMVar :: MVar -> Tau -> TC ()
+writeMVar :: MVar -> Type -> TC ()
 writeMVar (Meta _ ref) ty = do
   lift (writeIORef ref (Just ty))
 
@@ -92,19 +92,19 @@ writeMVar (Meta _ ref) ty = do
   -- Read free variables of a list of expressions after zonking (mvars, tbars...)
 ---------------------------------------------------------------------------------------------------
 
-getEnvTypes :: TC [Type]
-getEnvTypes = do
+getEnvSchemes :: TC [Scheme]
+getEnvSchemes = do
   env <- getEnv
   return $ M.elems env
 
-getFreeMVars :: [Type] -> TC [MVar]
+getFreeMVars :: [Scheme] -> TC [MVar]
 getFreeMVars types = do
-  types' <- mapM zonkType types
+  types' <- mapM zonkScheme types
   return $ freeMVars types'
 
-getFreeTVars :: [Type] -> TC [TVar]
+getFreeTVars :: [Scheme] -> TC [TVar]
 getFreeTVars types = do
-  types' <- mapM zonkType types
+  types' <- mapM zonkScheme types
   return $ freeTVars types'
 
 ---------------------------------------------------------------------------------------------------
@@ -129,34 +129,28 @@ newSkolem ty = do
 ---------------------------------------------------------------------------------------------------
 
 -- | Instantiate a @Forall@ type using fresh meta variables
-instantiate :: Sigma -> TC Rho
+instantiate :: Scheme -> TC Type
 instantiate (Forall tvs ty) = do
   tvs' <- mapM (\ _ -> MVar <$> newMVar) tvs
   return $ substitute (M.fromList (zip tvs tvs')) ty
-instantiate ty = return ty
 
 -- | Deeply skolemise a type (replace it's foralls by fresh skolem variables), this function return
 -- the generated skolem variables, and the skolemised type
-skolemise :: Sigma -> TC ([TVar], Rho)
+skolemise :: Scheme -> TC ([TVar], Type)
 skolemise (Forall tvars body) = do
-  sk1 <- mapM newSkolem tvars
-  (sk2, new_body) <- skolemise (substitute (M.fromList (zip tvars (map TVar sk1))) body)
-  return (sk1++sk2, new_body)
-skolemise (Arrow arg res) = do
-  (sk, res') <- skolemise res
-  return (sk, Arrow arg res')
-skolemise ty =
-  return ([], ty)
+  sk <- mapM newSkolem tvars
+  let new_body = substitute (M.fromList (zip tvars (map TVar sk))) body
+  return (sk, new_body)
 
 -- | Quantify (using a @Forall@) over a set of meta variables
-quantify :: [MVar] -> Rho -> TC Sigma
+quantify :: [MVar] -> Type -> TC Scheme
 quantify tvs ty = do
   mapM_ bind (zip tvs new_binders)
   ty' <- zonkType ty
   return (Forall new_binders ty')
 
   where
-    used_binders = bindersTVar ty
+    used_binders = freeTVars [Forall [] ty]
     new_binders = take (length tvs) (all_binders Data.List.\\ used_binders)
     bind (tv, ident) = writeMVar tv (TVar ident)
 
@@ -164,16 +158,22 @@ quantify tvs ty = do
       [BoundTv [x] | x <- ['a'..'z']] ++
       [BoundTv (x:show i) | i <- [1::Int ..], x <- ['a'..'z']]
 
-
 ---------------------------------------------------------------------------------------------------
   -- Zonkify types: replace all their known meta variables by their value
 ---------------------------------------------------------------------------------------------------
 
 -- | Replace all the known meta variables by their value
-zonkType :: Type -> TC Type
-zonkType (Forall ns ty) = do
+zonkScheme :: Scheme -> TC Scheme
+zonkScheme (Forall ns ty) = do
   ty' <- zonkType ty
   return (Forall ns ty')
+
+-- | Replace all the known meta variables by their value
+zonkType :: Type -> TC Type
+zonkType (App lhs rhs) = do
+  lhs' <- zonkType lhs
+  rhs' <- zonkType rhs
+  return (App lhs' rhs')
 zonkType (Arrow arg res) = do
   arg' <- zonkType arg
   res' <- zonkType res
@@ -193,18 +193,21 @@ zonkType t = pure t
 ---------------------------------------------------------------------------------------------------
 
 -- | Unity two tau types (without quantification)
-unify :: Tau -> Tau -> TC ()
-unify (Arrow a1 r1) (Arrow a2 r2)          = unify a1 a2 >> unify r1 r2
-unify (TVar v1)     (TVar v2) | v1 == v2   = pure ()
-unify (MVar v1)     (MVar v2) | v1 == v2   = pure ()
-unify (MVar v1)     ty                     = unifyMVar v1 ty
-unify ty            (MVar v2)              = unifyMVar v2 ty
-unify TInt          TInt                   = pure ()
-unify t1            t2                     =
-  fail ("can't unify: `" ++ show t1 ++ "` and `" ++ show t2 ++ "`")
+unify :: Type -> Type -> TC ()
+unify (TVar (BoundTv _)) _                      = fail "PANIC: unpexpected bound variable"
+unify _                  (TVar (BoundTv _))     = fail "PANIC: unpexpected bound variable"
+unify (App l1 r1)        (App l2 r2)            = unify l1 l2 >> unify r1 r2
+unify (Arrow a1 r1)      (Arrow a2 r2)          = unify a1 a2 >> unify r1 r2
+unify (TVar v1)          (TVar v2) | v1 == v2   = pure ()
+unify (MVar v1)          (MVar v2) | v1 == v2   = pure ()
+unify (MVar v1)          ty                     = unifyMVar v1 ty
+unify ty                 (MVar v2)              = unifyMVar v2 ty
+unify (TConst s1)        (TConst s2) | s1 == s2 = pure ()
+unify t1                 t2                     =
+  fail ("can't prove the equality of `" ++ show t1 ++ "` and `" ++ show t2 ++ "`")
 
 -- | Unity a meta variable with a tau type (without quantification)
-unifyMVar :: MVar -> Tau -> TC ()
+unifyMVar :: MVar -> Type -> TC ()
 unifyMVar v1 ty2 = do
   ty1 <- readMVar v1
   case ty1 of
@@ -218,13 +221,13 @@ unifyMVar v1 ty2 = do
             Nothing -> writeMVar v1 ty2
         _ -> do
           ty2' <- zonkType ty2
-          let mvars = freeMVars [ty2']
+          let mvars = freeMVars [Forall [] ty2']
           if v1 `elem` mvars
           then fail ""
           else writeMVar v1 ty2
 
 -- | Unify as an arrow: "force" a type to be a function
-unifyArrow :: Rho -> TC (Sigma, Rho)
+unifyArrow :: Type -> TC (Type, Type)
 unifyArrow (Arrow arg res) = return (arg, res)
 unifyArrow tau = do
   arg <- MVar <$> newMVar
@@ -232,83 +235,88 @@ unifyArrow tau = do
   unify tau (arg --> res)
   return (arg, res)
 
-
 data Expected a = Infer (IORef a) | Check a
 
--- | Check that an expression can be typed using a given rho expression
-checkRho :: Exp -> Rho -> TC ()
-checkRho expr ty = typecheckRho expr (Check ty)
+-- | Check that an expression can be typed using a given type
+checkType :: Exp -> Type -> TC ()
+checkType expr ty = typecheckExp expr (Check ty)
 
-
--- | Infer the type of an expression as a Rho type
-inferRho :: Exp -> TC Rho
-inferRho expr = do
-  ref <- lift $ newIORef (error "inferRho: empty result")
-  typecheckRho expr (Infer ref)
+-- | Infer the type of an expression as a Type type
+inferType :: Exp -> TC Type
+inferType expr = do
+  ref <- lift $ newIORef (error "inferType: empty result")
+  typecheckExp expr (Infer ref)
   lift $ readIORef ref
 
--- | Typecheck an expression in the domain of Rho types
-typecheckRho :: Exp -> Expected Rho -> TC ()
-typecheckRho (Lit Undefined) expected = do
+-- | typecheckExp an expression in the domain of Type types
+typecheckExp :: Exp -> Expected Type -> TC ()
+typecheckExp (Lit Undefined) expected = do
   ty <- MVar <$> newMVar
-  instSigma ty expected
-typecheckRho (Lit _) expected = instSigma TInt expected
-typecheckRho (Var v) expected = do
-  sigma <- lookupVar v
-  instSigma sigma expected
-typecheckRho (Apply fun (arg:args@(_:_))) expected = do
-  typecheckRho (Apply (Apply fun [arg]) args) expected
-typecheckRho (Apply fun []) expected =
-  typecheckRho fun expected
-typecheckRho (Apply fun [arg]) expected = do
-  fun_type <- inferRho fun
+  instType ty expected
+typecheckExp (Lit Undefined) expected =
+  instScheme (Forall [BoundTv "a"] (TVar (BoundTv "a"))) expected
+typecheckExp (Lit (CFun _ _)) expected =
+  instScheme (Forall [BoundTv "a"] (TVar (BoundTv "a"))) expected
+typecheckExp (Lit (Int _)) expected =
+  instType (TConst "Int") expected
+typecheckExp (Lit (Tag _)) expected =
+  instType (TConst "Int") expected
+typecheckExp (Var v) expected = do
+  scheme <- lookupVar v
+  instScheme scheme expected
+typecheckExp (Apply fun (arg:args@(_:_))) expected = do
+  typecheckExp (Apply (Apply fun [arg]) args) expected
+typecheckExp (Apply fun []) expected =
+  typecheckExp fun expected
+typecheckExp (Apply fun [arg]) expected = do
+  fun_type <- inferType fun
   (arg_type, res_type) <- unifyArrow fun_type
-  checkSigma arg arg_type
-  instSigma res_type expected
-typecheckRho (Lambda (var:vars@(_:_)) body) expected =
-  typecheckRho (Lambda [var] (Lambda vars body)) expected
-typecheckRho (Lambda [] body) expected =
-  typecheckRho body expected
-typecheckRho (Lambda [var] body) (Check fun_ty) = do
+  checkType arg arg_type
+  instType res_type expected
+typecheckExp (Lambda (var:vars@(_:_)) body) expected =
+  typecheckExp (Lambda [var] (Lambda vars body)) expected
+typecheckExp (Lambda [] body) expected =
+  typecheckExp body expected
+typecheckExp (Lambda [var] body) (Check fun_ty) = do
   (arg_type, res_type) <- unifyArrow fun_ty
-  envScope var arg_type (checkRho body res_type)
-typecheckRho (Lambda [var] body) (Infer ref) = do
+  envScope var (Forall [] arg_type) (checkType body res_type)
+typecheckExp (Lambda [var] body) (Infer ref) = do
   arg_type <- MVar <$> newMVar
-  res_type <- envScope var arg_type (inferRho body)
+  res_type <- envScope var (Forall [] arg_type) (inferType body)
   lift $ writeIORef ref (arg_type --> res_type)
-typecheckRho (Annot body annot) expected = do
-  checkSigma body annot
-  instSigma annot expected
-typecheckRho (Switch cond list) expected = do
-  checkSigma cond TInt
+typecheckExp (Annot body annot) expected = do
+  checkType body annot
+  instType annot expected
+typecheckExp (Switch cond list) expected = do
+  checkType cond (TConst "Int")
   out <- MVar <$> newMVar
   forM_ list \ (_,val) -> do
-    val_type <- inferRho val
+    val_type <- inferType val
     unify val_type out
-  instSigma out expected
-typecheckRho (LetIn var e1 e2) expected = do
+  instType out expected
+typecheckExp (LetIn var e1 e2) expected = do
   meta <- MVar <$> newMVar
-  var_type <- envScope var meta (inferSigma e1)
-  envScope var var_type (typecheckRho e2 expected)
+  var_type <- envScope var (Forall [] meta) (inferScheme e1)
+  envScope var var_type (typecheckExp e2 expected)
 
--- | Infer the type of an expression as a sigma type: quantify over all the meta-variables of the
+-- | Infer the type of an expression as a scheme: quantify over all the meta-variables of the
 -- expression (except the mvars from the environment)
-inferSigma :: Exp -> TC Sigma
-inferSigma expr = do
-  exp_ty <- inferRho expr
-  env_tvars <- getEnvTypes
+inferScheme :: Exp -> TC Scheme
+inferScheme expr = do
+  exp_ty <- inferType expr
+  env_tvars <- getEnvSchemes
   env_mvars <- getFreeMVars env_tvars
-  exp_mvars <- getFreeMVars [exp_ty]
+  exp_mvars <- getFreeMVars [Forall [] exp_ty]
   let forall_mvars = exp_mvars Data.List.\\ env_mvars
   quantify forall_mvars exp_ty
 
--- | Check the type of an expression over a sigma expression
-checkSigma :: Exp -> Sigma -> TC ()
-checkSigma expr sigma = do
-  (skol, rho) <- skolemise sigma
-  checkRho expr rho
-  env_types <- getEnvTypes
-  free <- getFreeTVars (sigma : env_types)
+-- | Check the type of an expression over a scheme
+checkScheme :: Exp -> Scheme -> TC ()
+checkScheme expr scheme = do
+  (skol, ty) <- skolemise scheme
+  checkType expr ty
+  env_types <- getEnvSchemes
+  free <- getFreeTVars (scheme : env_types)
   let bad = filter (`elem` free) skol
   check (null bad) ("Type not polymorphic enough")
 
@@ -316,44 +324,38 @@ checkSigma expr sigma = do
   -- Check that a types subsume another
 ---------------------------------------------------------------------------------------------------
 
--- | Check that one sigma type subsume another
-subsumptionCheck :: Sigma -> Sigma -> TC ()
-subsumptionCheck sigma1 sigma2 = do
-  (skl2, rho2) <- skolemise sigma2
-  subsumptionCheckRho sigma1 rho2
-  tvars <- getFreeTVars [sigma1,sigma2]
+-- | Check that one scheme subsume another
+subsumptionCheck :: Scheme -> Scheme -> TC ()
+subsumptionCheck scheme1 scheme2 = do
+  (skl2, ty2) <- skolemise scheme2
+  subsumptionCheckType scheme1 ty2
+  tvars <- getFreeTVars [scheme1,scheme2]
   let bad = filter (`elem` tvars) skl2
-  check (null bad) ("subsumption failed: `" ++ show sigma1 ++ "` and `" ++ show sigma2 ++ "`")
+  check (null bad) ("subsumption failed: `" ++ show scheme1 ++ "` and `" ++ show scheme2 ++ "`")
 
--- | Check that a sigma expression subsume a rho type
-subsumptionCheckRho :: Sigma -> Rho -> TC ()
-subsumptionCheckRho sigma@(Forall _ _) rho2 = do
-  rho1 <- instantiate sigma
-  subsumptionCheckRho rho1 rho2
+-- | Check that a scheme subsume a type
+subsumptionCheckType :: Scheme -> Type -> TC ()
+subsumptionCheckType scheme@(Forall _ _) ty2 = do
+  ty1 <- instantiate scheme
+  unify ty1 ty2
 
-subsumptionCheckRho rho1 (Arrow arg2 res2) = do
-  (arg1, res1) <- unifyArrow rho1
-  subsumptionCheck arg2 arg1
-  subsumptionCheckRho res1 res2
+-- | Instantiate a type
+instType :: Type -> Expected Type -> TC ()
+instType t1 (Check t2) = unify t1 t2
+instType t1 (Infer r) = do
+  lift $ writeIORef r t1
 
-subsumptionCheckRho (Arrow arg1 res1) rho2 = do
-  (arg2, res2) <- unifyArrow rho2
-  subsumptionCheck arg2 arg1
-  subsumptionCheckRho res1 res2
-
-subsumptionCheckRho tau1 tau2 = unify tau1 tau2
-
--- | Instantiate a sigma type
-instSigma :: Sigma -> Expected Rho -> TC ()
-instSigma t1 (Check t2) = subsumptionCheckRho t1 t2
-instSigma t1 (Infer r) = do
+-- | Instantiate a scheme
+instScheme :: Scheme -> Expected Type -> TC ()
+instScheme t1 (Check t2) = subsumptionCheckType t1 t2
+instScheme t1 (Infer r) = do
   t1' <- instantiate t1
   lift $ writeIORef r t1'
 
 test :: IO ()
-test = wrap $ runTC [("+",TInt --> (TInt --> TInt))] do
+test = wrap $ runTC [("+",Forall [] $ int --> (int --> int))] do
   m0 <- MVar <$> newMVar
-  envScope "-" m0 $ do
+  envScope "-" (Forall [] m0) $ do
     debug $ Lambda ["x"] (lit 42 -: (Var "x" +: lit 43))
   debug rec_letin
   subsumptionCheck lhs rhs
@@ -362,12 +364,15 @@ test = wrap $ runTC [("+",TInt --> (TInt --> TInt))] do
     (+:) a b = Apply (Var "+") [a, b]
     (-:) a b = Apply (Var "-") [a, b]
 
-    debug expression = inferRho expression >>= zonkType >>= lift . print
+    debug expression = inferType expression >>= zonkType >>= lift . print
 
     x = BoundTv "x"
-    lhs = Forall [x] (Arrow (TVar x) (TVar x))
+    y = BoundTv "y"
+    int = TConst "Int"
+    foo = TConst "foo"
+    lhs = Forall [x,y] (TVar y --> TVar y)
 
-    rhs = Arrow TInt TInt
+    rhs = Forall [x] $ int --> (int --> int)
 
     rec_letin =
       LetIn "f" (Lambda ["x"] (Apply (Var "+") [Var "x", Apply (Var "f") [Var "x"]])) (Var "f")

@@ -34,6 +34,7 @@ data Pattern
   = Wildcard
   | PCons Id [Pattern]
   | PVar Id
+  | PInt Int
   deriving (Eq, Ord)
 
 -- | Builtin expressions
@@ -44,27 +45,20 @@ data Lit
   | Undefined        -- ^ An undefined object
   | Cons Id          -- ^ A type constructor
 
--- | General type
-type Sigma = Type
-
--- | Non top-level @Forall@ type
-type Rho = Type
-
--- | A type without @Forall@
-type Tau = Type
-
 -- | Types definition
 data Type
-  = Forall [TVar] Rho
-  -- ^ Type abstraction
-  | Arrow Type Type
+  = Arrow Type Type
   -- ^ Type of functions
-  | TInt
+  | App Type Type
+  -- ^ Type application
+  | TConst String
   -- ^ Integer type
   | TVar TVar
   -- ^ Type variable
   | MVar MVar
   -- ^ Meta type variable, created by the type checker
+
+data Scheme = Forall [TVar] Type
 
 data Kind
   = Star
@@ -84,14 +78,14 @@ type Uniq = Int
 data MVar = Meta Uniq TyRef
 
 -- | Nothing means that the variable has not been substitued yet
-type TyRef = IORef (Maybe Tau)
+type TyRef = IORef (Maybe Type)
 
 -- | A declaration is either a function declaration, or the declaration of a constructor of a given
 -- arity
 data DeclBody
   = FunDecl [Id] Exp
   -- ^ Declare a function with a given set of arguments and a body
-  | ConstructorDecl Int
+  | ConstructorDecl Scheme
   -- ^ Declare a constructor of a specific arity
 
 -- | Map function names to expressions
@@ -111,7 +105,7 @@ instance Ord TVar where
   (SkolemTv _ _) <= (BoundTv _) = True
   _ <= _ = False
 
-(-->) :: Sigma -> Sigma -> Sigma
+(-->) :: Type -> Type -> Type
 arg --> res = Arrow arg res
 
 instance Show Lit where
@@ -122,6 +116,7 @@ instance Show Lit where
   show (Tag t) = t
 
 instance Show Pattern where
+  show (PInt i) = show i
   show Wildcard = "_"
   show (PVar v) = v
   show (PCons name args) = "(" ++ name ++ " " ++ intercalate " " (map show args) ++ ")"
@@ -205,6 +200,7 @@ freeVars (Case e []) = freeVars e
 
 patternVars :: Pattern -> S.Set Id
 patternVars Wildcard = S.empty
+patternVars (PInt _) = S.empty
 patternVars (PVar v) = S.singleton v
 patternVars (PCons _ args) = foldr S.union S.empty (map patternVars args)
 
@@ -224,44 +220,37 @@ permute m (Case e list) =
     where
       reducedMap pat = (S.foldr M.delete m (patternVars pat))
 
-freeMVars :: [Type] -> [MVar]
-freeMVars tys = foldr go [] tys
+freeMVars :: [Scheme] -> [MVar]
+freeMVars tys = foldr (\ (Forall _ body) -> go body) [] tys
   where
     go (MVar tv) acc
-      | tv `elem` acc     = acc
-      | otherwise         = tv:acc
-    go (TVar _) acc      = acc
-    go TInt      acc      = acc
+      | tv `elem` acc      = acc
+      | otherwise          = tv:acc
+    go (TVar _) acc        = acc
+    go (TConst _) acc      = acc
     go (Arrow arg res) acc = go arg (go res acc)
-    go (Forall _ ty) acc = go ty acc
+    go (App t1 t2) acc = go t1 (go t2 acc)
 
-freeTVars :: [Type] -> [TVar]
-freeTVars tys = foldr (go []) [] tys
+freeTVars :: [Scheme] -> [TVar]
+freeTVars schemes = foldr (\ (Forall bound t) -> go bound t) [] schemes
   where
     go bound (TVar v) acc
       | v `elem` bound            = acc
       | v `elem` acc              = acc
       | otherwise                 = v:acc
-    go _     TInt acc             = acc
-    go _     (MVar _) acc       = acc
-    go bound (Forall tvs ty) acc = go (tvs ++ bound) ty acc
-    go bound (Arrow arg res) acc   = go bound arg (go bound res acc)
+    go _     (TConst _) acc       = acc
+    go _     (MVar _) acc         = acc
+    go bound (App t1 t2) acc      = go bound t1 (go bound t2 acc)
+    go bound (Arrow arg res) acc  = go bound arg (go bound res acc)
 
-bindersTVar :: Rho -> [TVar]
-bindersTVar ty = nub (binders ty)
-  where
-    binders (Forall tvs body) = tvs ++ binders body
-    binders (Arrow arg res)     = binders arg ++ binders res
-    binders _                  = []
-
-type TyEnv = M.Map TVar Tau
+type TyEnv = M.Map TVar Type
 substitute :: TyEnv -> Type -> Type
 substitute env (Arrow arg res) = Arrow (substitute env arg) (substitute env res)
+substitute env (App t1 t2) = App (substitute env t1) (substitute env t2)
 substitute env (TVar v) =
   case M.lookup v env of
     Just x -> x
     _ -> TVar v
-substitute env (Forall tys ty) = Forall tys (substitute (foldr M.delete env tys) ty)
 substitute _ t = t
 
 tyVarId :: TVar -> Id
@@ -276,13 +265,23 @@ instance Show TVar where
   show (SkolemTv s u) = s ++ "#" ++ show u
 
 instance Show Type where
-  show (Forall args body) = "forall " ++ intercalate " " (map show args) ++ ". " ++ show body
-  show (Arrow arg@(Forall _ _) res) = "(" ++ show arg ++ ") -> " ++ show res
   show (Arrow arg@(Arrow _ _) res) = "(" ++ show arg ++ ") -> " ++ show res
   show (Arrow arg res) = show arg ++ " -> " ++ show res
   show (TVar tvar) = show tvar
   show (MVar mvar) = show mvar
-  show TInt = "int"
+  show (TConst name) = name
+
+  show (App fn arg) = lhs fn ++ " " ++ rhs arg
+    where
+      lhs t@(Arrow _ _) = "(" ++ show t ++ ")"
+      lhs t = show t
+
+      rhs t@(Arrow _ _) = "(" ++ show t ++ ")"
+      rhs t@(App _ _) = "(" ++ show t ++ ")"
+      rhs t = show t
+
+instance Show Scheme where
+  show (Forall args body) = "forall " ++ intercalate " " (map show args) ++ ". " ++ show body
 
 class Displayable a where
   display :: a -> Doc
