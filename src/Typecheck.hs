@@ -122,7 +122,7 @@ newMVar = do
 newSkolem :: TVar -> TC TVar
 newSkolem ty = do
   uniq <- newUnique
-  return (SkolemTv (tyVarId ty) uniq)
+  return (Skolem (tyVarId ty) uniq)
 
 ---------------------------------------------------------------------------------------------------
   -- Forall/Exists manipulation: instantiation of foralls, skolemisation and quantification
@@ -155,8 +155,8 @@ quantify tvs ty = do
     bind (tv, ident) = writeMVar tv (TVar ident)
 
     all_binders =
-      [BoundTv [x] | x <- ['a'..'z']] ++
-      [BoundTv (x:show i) | i <- [1::Int ..], x <- ['a'..'z']]
+      [Bound [x] | x <- ['a'..'z']] ++
+      [Bound (x:show i) | i <- [1::Int ..], x <- ['a'..'z']]
 
 ---------------------------------------------------------------------------------------------------
   -- Zonkify types: replace all their known meta variables by their value
@@ -194,8 +194,8 @@ zonkType t = pure t
 
 -- | Unity two tau types (without quantification)
 unify :: Type -> Type -> TC ()
-unify (TVar (BoundTv _)) _                      = fail "PANIC: unpexpected bound variable"
-unify _                  (TVar (BoundTv _))     = fail "PANIC: unpexpected bound variable"
+unify (TVar (Bound _))   _                      = fail "PANIC: unpexpected bound variable"
+unify _                  (TVar (Bound _))       = fail "PANIC: unpexpected bound variable"
 unify (App l1 r1)        (App l2 r2)            = unify l1 l2 >> unify r1 r2
 unify (Arrow a1 r1)      (Arrow a2 r2)          = unify a1 a2 >> unify r1 r2
 unify (TVar v1)          (TVar v2) | v1 == v2   = pure ()
@@ -223,7 +223,7 @@ unifyMVar v1 ty2 = do
           ty2' <- zonkType ty2
           let mvars = freeMVars [Forall [] ty2']
           if v1 `elem` mvars
-          then fail ""
+          then fail ("can't prove equality between `"++show v1++"` and `"++show ty2'++"`")
           else writeMVar v1 ty2
 
 -- | Unify as an arrow: "force" a type to be a function
@@ -248,21 +248,34 @@ inferType expr = do
   typecheckExp expr (Infer ref)
   lift $ readIORef ref
 
--- | typecheckExp an expression in the domain of Type types
+checkPattern :: Pattern -> Type -> TC () -> TC ()
+checkPattern (PInt _) ty kont = unify ty (TConst "Int") >> kont
+checkPattern (PVar v) ty kont = envScope v (Forall [] ty) kont
+checkPattern Wildcard _  k = k
+checkPattern (PCons cons args) ty kont = do
+  scheme <- lookupVar cons
+  arrow <- instantiate scheme
+  go arrow args \ t -> unify ty t >> kont
+  where
+    go (Arrow arg res) (p:ps) k = checkPattern p arg (go res ps k)
+    go _               (_:_)  _ = fail ("`"++cons++"` is applied to too many arguments")
+    go res             []     k = k res
+
+-- | typecheckExp an expression in the domain of types
 typecheckExp :: Exp -> Expected Type -> TC ()
-typecheckExp (Lit Undefined) expected = do
-  ty <- MVar <$> newMVar
-  instType ty expected
 typecheckExp (Lit Undefined) expected =
-  instScheme (Forall [BoundTv "a"] (TVar (BoundTv "a"))) expected
+  instScheme (Forall [Bound "a"] (TVar (Bound "a"))) expected
 typecheckExp (Lit (CFun _ _)) expected =
-  instScheme (Forall [BoundTv "a"] (TVar (BoundTv "a"))) expected
+  instScheme (Forall [Bound "a"] (TVar (Bound "a"))) expected
 typecheckExp (Lit (Int _)) expected =
   instType (TConst "Int") expected
 typecheckExp (Lit (Tag _)) expected =
   instType (TConst "Int") expected
 typecheckExp (Var v) expected = do
   scheme <- lookupVar v
+  instScheme scheme expected
+typecheckExp (Lit (Cons c)) expected = do
+  scheme <- lookupVar c
   instScheme scheme expected
 typecheckExp (Apply fun (arg:args@(_:_))) expected = do
   typecheckExp (Apply (Apply fun [arg]) args) expected
@@ -287,12 +300,18 @@ typecheckExp (Lambda [var] body) (Infer ref) = do
 typecheckExp (Annot body annot) expected = do
   checkType body annot
   instType annot expected
-typecheckExp (Switch cond list) expected = do
-  checkType cond (TConst "Int")
+-- typecheckExp (Switch cond list) expected = do
+--   checkType cond (TConst "Int")
+--   out <- MVar <$> newMVar
+--   forM_ list \ (_,val) -> do
+--     val_type <- inferType val
+--     unify val_type out
+--   instType out expected
+typecheckExp (Case expr patterns) expected = do
+  expr_ty <- inferType expr
   out <- MVar <$> newMVar
-  forM_ list \ (_,val) -> do
-    val_type <- inferType val
-    unify val_type out
+  forM_ patterns \ (pat,e) -> do
+    checkPattern pat expr_ty (checkType e out)
   instType out expected
 typecheckExp (LetIn var e1 e2) expected = do
   meta <- MVar <$> newMVar
@@ -366,8 +385,8 @@ test = wrap $ runTC [("+",Forall [] $ int --> (int --> int))] do
 
     debug expression = inferType expression >>= zonkType >>= lift . print
 
-    x = BoundTv "x"
-    y = BoundTv "y"
+    x = Bound "x"
+    y = Bound "y"
     int = TConst "Int"
     foo = TConst "foo"
     lhs = Forall [x,y] (TVar y --> TVar y)

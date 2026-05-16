@@ -37,7 +37,7 @@ createFunNodes = go
     go decls (Lambda xs e) = Lambda xs (go (foldr M.delete decls xs) e)
     go decls (Apply f args) = Apply (go decls f) (map (go decls) args)
     go decls (LetIn x e1 e2) = let d = M.delete x decls in LetIn x (go d e1) (go d e2)
-    go decls (Switch c l) = Switch (go decls c) (map (\ (a,b) -> (a,go decls b)) l)
+    go decls (Ite i t e) = Ite (go decls i) (go decls t) (go decls e)
     go decls (Annot e t) = Annot (go decls e) t
     go decls (Case e list) =
       let reducedDecls pat = S.foldr M.delete decls (patternVars pat) in

@@ -23,7 +23,7 @@ type Id = String
 data Exp
   = Lit Lit                    -- ^ Constant integer
   | Var Id                     -- ^ Local variable or function call (before lowering)
-  | Switch Exp [(Lit, Exp)]    -- ^ switch (used to implement pattern matching and if-then-else)
+  | Ite Exp Exp Exp            -- ^ Conditional operations
   | Apply Exp [Exp]            -- ^ Function application
   | LetIn Id Exp Exp           -- ^ Local variable definition
   | Lambda [Id] Exp            -- ^ Lambda abstraction
@@ -66,9 +66,9 @@ data Kind
 
 -- | Type variables
 data TVar
-  = BoundTv Id
+  = Bound Id
   -- ^ A type variable bounded by a @Forall@
-  | SkolemTv Id Uniq
+  | Skolem Id Uniq
   -- ^ A skolemised type variable, used to generate fresh type variables
 
 -- | Unique identifier of a slolemised variable
@@ -95,14 +95,14 @@ instance Eq MVar where
   (Meta u1 _) == (Meta u2 _) = u1 == u2
 
 instance Eq TVar where
-  (BoundTv s1) == (BoundTv s2) = s1 == s2
-  (SkolemTv _ u1) == (SkolemTv _ u2) = u1 == u2
+  (Bound s1) == (Bound s2) = s1 == s2
+  (Skolem _ u1) == (Skolem _ u2) = u1 == u2
   _ == _ = False
 
 instance Ord TVar where
-  (BoundTv s1) <= (BoundTv s2) = s1 <= s2
-  (SkolemTv _ u1) <= (SkolemTv _ u2) = u1 <= u2
-  (SkolemTv _ _) <= (BoundTv _) = True
+  (Bound s1) <= (Bound s2) = s1 <= s2
+  (Skolem _ u1) <= (Skolem _ u2) = u1 <= u2
+  (Skolem _ _) <= (Bound _) = True
   _ <= _ = False
 
 (-->) :: Type -> Type -> Type
@@ -154,8 +154,8 @@ instance Uniplate Exp where
   uniplate (Apply f args) = (f:args, \ l -> Apply (l!!0) (drop 1 l))
   uniplate (LetIn x e1 e2) = ([e1,e2], \ l -> LetIn x (l!!0) (l!!1))
   uniplate (Annot e t) = ([e], \ l -> Annot (l!!0) t)
-  uniplate (Switch cond args) =
-    (cond:map snd args, \ l -> Switch (l!!0) (zip (map fst args) (drop 1 l)))
+  uniplate (Ite i t e) =
+    ([i,t,e], \ l -> Ite (l!!0) (l!!1) (l!!2))
   uniplate (Case val cases) =
     (val:map snd cases, \ l -> Case (l!!0) (zip (map fst cases) (drop 1 l)))
 
@@ -164,11 +164,8 @@ instance Show Exp where
   show (Lit i) = show i
   show (Var ident) = ident
   show (Lambda args e) = "( \\ " ++ concat (intersperse " " args) ++ " -> " ++ show e ++ " )"
-  show (Switch i [(Int 1,t), (Undefined, e)]) =
+  show (Ite i t e) =
     "( if " ++ show i ++ " then " ++ show t ++ " else " ++ show e ++ " )"
-  show (Switch cond pairs) =
-    "(" ++ intercalate "; "
-      (map (\(val,body) -> show cond ++ " == " ++ show val ++ " -> " ++ show body) pairs) ++ ")"
   show (Apply f args) = show f ++ "(" ++ concat (intersperse "," (map show args)) ++ ")"
   show (LetIn x e1 e2) = "( let " ++ x ++ " = " ++ show e1 ++ " in " ++ show e2 ++ " )"
   show (Annot e t) = "( " ++ show e ++ " :: " ++ show t ++ " )"
@@ -182,8 +179,7 @@ instance Show DeclBody where
 freeVars :: Exp -> S.Set Id
 freeVars (Lit _) = S.empty
 freeVars (Var x) = S.singleton x
-freeVars (Switch cond []) = freeVars cond
-freeVars (Switch cond ((_,x):xs)) = S.union (freeVars x) (freeVars (Switch cond xs))
+freeVars (Ite i t e) = S.union (freeVars i) (S.union (freeVars t) (freeVars e))
 freeVars (Apply fun (x:xs)) =
   S.union (freeVars x) (freeVars (Apply fun xs))
 freeVars (Apply fun []) = freeVars fun
@@ -210,7 +206,7 @@ permute m e@(Var i) =
   case M.lookup i m of
     Just v -> v
     _ -> e
-permute m (Switch c l) = Switch (permute m c) (map (\ (lit,val) -> (lit, permute m val)) l)
+permute m (Ite i t e) = Ite (permute m i) (permute m t) (permute m e)
 permute m (Apply f a) = Apply (permute m f) (map (permute m) a)
 permute m (Annot e t) = Annot (permute m e) t
 permute m (Lambda xs e) = Lambda xs $ permute (foldr M.delete m xs) e
@@ -254,15 +250,15 @@ substitute env (TVar v) =
 substitute _ t = t
 
 tyVarId :: TVar -> Id
-tyVarId (SkolemTv i _) = i
-tyVarId (BoundTv i) = i
+tyVarId (Skolem i _) = i
+tyVarId (Bound i) = i
 
 instance Show MVar where
   show (Meta u _) = "?" ++ show u
 
 instance Show TVar where
-  show (BoundTv s) = s
-  show (SkolemTv s u) = s ++ "#" ++ show u
+  show (Bound s) = s
+  show (Skolem s u) = s ++ "#" ++ show u
 
 instance Show Type where
   show (Arrow arg@(Arrow _ _) res) = "(" ++ show arg ++ ") -> " ++ show res

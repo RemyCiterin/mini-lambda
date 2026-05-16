@@ -67,7 +67,13 @@ map f list =
     Cons a l -> Cons (f a) (map f l)
     Nil -> Nil
 
-arange n = if n == 0 then Nil else Cons 0 (map (\ x -> x + 1) (arange (n-1)))
+-- arange n = if n == 0 then Nil else Cons 0 (map (\ x -> x + 1) (arange (n-1)))
+arange n = go 0 n
+  where
+    go x y =
+      if x >= y
+      then Nil
+      else Cons x (go (x+1) y)
 
 sum list =
   case list of
@@ -94,5 +100,5 @@ fibo x =
     1 -> 1
     _ -> fibo xm1 + fibo xm2
   where
-    xm2 = identity (x - 2)
     xm1 = x - 1
+    xm2 = identity (xm1 - 1)

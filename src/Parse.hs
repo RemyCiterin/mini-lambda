@@ -189,12 +189,12 @@ forallType = do
   idents <- many1 variable
   spec '.'
   ty <- typ
-  return (AST.Forall (AST.BoundTv <$> idents) ty)
+  return (AST.Forall (AST.Bound <$> idents) ty)
 
 varType :: Parser AST.Type
 varType = do
   ident <- variable
-  return (AST.TVar $ AST.BoundTv ident)
+  return (AST.TVar $ AST.Bound ident)
 
 consType :: Parser AST.Type
 consType = do
@@ -322,7 +322,7 @@ ifExp = do
   option () (spec ';')
   keyword "else"
   e <- expr
-  return (AST.Switch i [(AST.Int 0,e), (AST.Undefined, t)])
+  return (AST.Ite i t e)
 
 
 -- | See https://www.haskell.org/onlinereport/haskell2010/haskellch10.html#x17-17800010.3
@@ -360,7 +360,7 @@ dataTypeParse :: Parser [(String, AST.DeclBody)]
 dataTypeParse = do
   keyword "data"
   ty_name <- AST.TConst <$> constructor
-  ty_vars <- map (AST.TVar . AST.BoundTv) <$> many variable
+  ty_vars <- map (AST.TVar . AST.Bound) <$> many variable
   spec '='
   sepBy (cons (apply ty_name ty_vars)) (spec '|')
     where

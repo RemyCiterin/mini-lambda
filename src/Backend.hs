@@ -197,26 +197,18 @@ compileExp env (Apply fun es) = do
   var <- declareAs $ "apply_closure(word_to_closure("++f++"),"++buf++","++show m++")"
   return var
 
-compileExp env (Switch cond list) = do
-  var_i <- compileExp env cond
+compileExp env (Ite i_exp t_exp e_exp) = do
+  i_var <- compileExp env i_exp
   var <- declare
-  insert $ "switch (word_to_int(" ++ var_i ++ "))"
-  scope $ do
-    go var list
+  insert $ "if (word_to_int(" ++ i_var ++ "))"
+  scope do
+    t_var <- compileExp env t_exp
+    assign var t_var
+  insert "else"
+  scope do
+    e_var <- compileExp env e_exp
+    assign var e_var
   return var
-    where
-      go var ((Undefined, expr):_) = do
-        insert $ "default:"
-        x <- compileExp env expr
-        assign var x
-        insert "break;"
-      go var ((lit, expr):others) = do
-        insert $ "case " ++ show lit ++":"
-        x <- compileExp env expr
-        assign var x
-        insert "break;"
-        go var others
-      go _ [] = pure ()
 
 compileExp env (Case e patterns) = do
   compileCase env e patterns
