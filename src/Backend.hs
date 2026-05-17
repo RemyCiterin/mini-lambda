@@ -134,11 +134,11 @@ compileDecls :: Decls -> CGen ()
 compileDecls decls = do
   iterDecls \ name decl ->
     case decl of
-      FunDecl _ _ -> insert $ "word_t "++name++"(word_t*);\n"
+      FunDecl _ _ _ -> insert $ "word_t "++name++"(word_t*);\n"
       ConstructorDecl (Forall _ ty) -> implementCons name (nargs ty)
   iterDecls \ name decl ->
     case decl of
-      FunDecl args body -> implementFun name args body
+      FunDecl args body _ -> implementFun name args body
       _ -> pure ()
   where
     iterDecls :: (Id -> DeclBody -> CGen ()) -> CGen ()

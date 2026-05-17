@@ -369,7 +369,7 @@ dataTypeParse = do
       apply f [] = f
 
       lambda :: [AST.Type] -> AST.Type -> AST.Type
-      lambda (x:xs) ret = lambda xs (AST.Arrow x ret)
+      lambda (x:xs) ret = AST.Arrow x (lambda xs ret)
       lambda [] ret = ret
 
       cons :: AST.Type -> Parser (String, AST.DeclBody)
@@ -446,10 +446,10 @@ globalDecl =
       parse_infix = keyword "infix" >> integer >> operator >> pure []
       parse_fundecl = do
         (name,args,body) <- functionDeclaration
-        pure [(name,AST.FunDecl args body)]
+        pure [(name,AST.FunDecl args body Nothing)]
       parse_foreign = do
         (name,body) <- foreignDeclaration
-        pure [(name,AST.FunDecl [] body)]
+        pure [(name,AST.FunDecl [] body Nothing)]
 
 program :: Parser AST.Decls
 program = do

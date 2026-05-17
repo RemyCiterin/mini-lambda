@@ -3,6 +3,7 @@ module Typecheck where
 import AST
 import qualified Data.List
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Control.Monad
 import Data.IORef
 
@@ -58,6 +59,10 @@ lift io = TC{unTC= \ _ -> Right <$> io}
 
 envScope :: Id -> Scheme -> TC a -> TC a
 envScope var ty TC{unTC=tc} = TC{unTC= \ env -> tc env{var_env= M.insert var ty (var_env env)}}
+
+envScopes :: [(Id, Scheme)] -> TC a -> TC a
+envScopes ((var,ty):xs) kont = envScope var ty (envScopes xs kont)
+envScopes [] kont = kont
 
 getEnv :: TC (M.Map Id Scheme)
 getEnv = TC {unTC= \env -> pure (Right (var_env env))}
@@ -300,13 +305,12 @@ typecheckExp (Lambda [var] body) (Infer ref) = do
 typecheckExp (Annot body annot) expected = do
   checkType body annot
   instType annot expected
--- typecheckExp (Switch cond list) expected = do
---   checkType cond (TConst "Int")
---   out <- MVar <$> newMVar
---   forM_ list \ (_,val) -> do
---     val_type <- inferType val
---     unify val_type out
---   instType out expected
+typecheckExp (Ite i t e) expected = do
+  checkType i (TConst "Int")
+  out <- MVar <$> newMVar
+  checkType t out
+  checkType e out
+  instType out expected
 typecheckExp (Case expr patterns) expected = do
   expr_ty <- inferType expr
   out <- MVar <$> newMVar
@@ -314,9 +318,37 @@ typecheckExp (Case expr patterns) expected = do
     checkPattern pat expr_ty (checkType e out)
   instType out expected
 typecheckExp (LetIn var e1 e2) expected = do
-  meta <- MVar <$> newMVar
-  var_type <- envScope var (Forall [] meta) (inferScheme e1)
+  [var_type] <- inferRecursiveDefsSchemes [(var,e1)]
   envScope var var_type (typecheckExp e2 expected)
+
+-- | Infer the type of a recursive expression of the form @name = expr@, it does that by checking
+-- the type of @Lambda [name] expr@ against @t -> t@. This idea is used for typechecking of
+-- expressions without annotations (generalised for mutual recursion here).
+--
+-- In particular, this means that without explicit annotations, the recursive calls of a function
+-- should use the same type arguments as the outer call. As example, in the following expression:
+--
+-- > foo x = if foo False then x else x
+--
+-- the typechecker will infer that @foo@ have type @Bool -> Bool@, even if with annotation, it is
+-- possible to check that @foo@ have type @forall a. a -> a@
+inferRecursiveDefsSchemes :: [(Id,Exp)] -> TC [Scheme]
+inferRecursiveDefsSchemes defs = do
+  exprs_ty <- map MVar <$> replicateM n newMVar
+  let env = zip names (map (Forall []) exprs_ty)
+
+  forM_ (zip exprs exprs_ty) \ (expr, expr_ty) -> do
+    envScopes env (checkType expr expr_ty)
+
+  forM exprs_ty \ expr_ty -> do
+    env_tvars <- getEnvSchemes
+    env_mvars <- getFreeMVars env_tvars
+    exp_mvars <- getFreeMVars [Forall [] expr_ty]
+    let forall_mvars = exp_mvars Data.List.\\ env_mvars
+    quantify forall_mvars expr_ty
+  where
+    (names, exprs) = unzip defs
+    n = length defs
 
 -- | Infer the type of an expression as a scheme: quantify over all the meta-variables of the
 -- expression (except the mvars from the environment)
@@ -338,6 +370,84 @@ checkScheme expr scheme = do
   free <- getFreeTVars (scheme : env_types)
   let bad = filter (`elem` free) skol
   check (null bad) ("Type not polymorphic enough")
+
+-- | Find the strongly connected components using Kosaraju's algorithm
+findScc :: Ord a => (a -> a -> Bool) -> [a] -> [[a]]
+findScc edges list = go S.empty (reverse order)
+  where
+    -- Deep-first search: return the order of visit of the nodes and the set of visited nodes
+    dfs _     marked []     = ([], marked)
+    dfs graph marked (x:xs) | S.member x marked = dfs graph marked xs
+    dfs graph marked (x:xs) =
+      let
+        next = [y | y <- list, graph x y]
+        (ret, new_marked) = dfs graph (S.insert x marked) (next++xs)
+       in (x:ret, new_marked)
+
+    (order,_) = dfs edges S.empty list
+
+    go _      [] = []
+    go marked (x:xs) =
+      let (cc, new_marked) = dfs (flip edges) marked [x] in
+      if null cc then go new_marked xs else cc : go new_marked xs
+
+-- | Typecheck a set of mutually recursive definitions:
+--
+-- Some of the definition are annotated, this means that we already have schemes to put in the
+-- environment to infer the schemes of the others. So we procede the following:
+--
+--  - First, we infer the schemes of all the non-annotated definitions using the idea that a
+--  recursive function can be seen at the fixed-point of a function of type @t -> t@,
+--  generalised to @t_1 -> ... -> t_n -> t_i@ with @1 <= i <= n@ here.
+--
+--  - Then we use the generated schemes to check the ones of the annotated functions using
+--  @checkScheme@.
+checkMutualRecursionSchemes :: [(Id, Exp, Maybe Scheme)] -> TC [(Id, Scheme)]
+checkMutualRecursionSchemes decls = do
+  -- Environment for type checking, all the not-annotated definitions are instantiated, and the
+  -- others use their skolemised declared scheme (meaning that we check that they are at least as
+  -- polymorphic as they are suppose to be)
+  let env1 = map (\(name,_,scheme) -> (name,scheme)) rhs
+
+  lhs_schemes <- envScopes env1 (inferRecursiveDefsSchemes lhs)
+
+  let env2 = env1 ++ zip (map fst lhs) lhs_schemes
+
+  forM_ rhs \ (_, expr, scheme) -> do
+    envScopes env2 (checkScheme expr scheme)
+
+  return env2
+
+  where
+    lhs = [(name, expr) | (name,expr,Nothing) <- decls]
+    rhs = [(name, expr, scheme) | (name,expr,Just scheme) <- decls]
+
+checkFunDecls :: M.Map Id (Exp, Maybe Scheme) -> TC [(Id, Scheme)]
+checkFunDecls decls = go order
+  where
+    edges :: Id -> Id -> Bool
+    edges i1 i2 = S.member i1 (freeVars $ fst (decls M.! i2))
+
+    order :: [[Id]]
+    order = findScc edges (M.keys decls)
+
+    go :: [[Id]] -> TC [(Id, Scheme)]
+    go [] = pure []
+    go (x:xs) = do
+      env1 <- checkMutualRecursionSchemes (map (\ i -> let (e,s) = decls M.! i in (i,e,s)) x)
+      env2 <- envScopes env1 (go xs)
+      pure (env1 ++ env2)
+
+checkProgram :: Decls -> TC (M.Map Id Scheme)
+checkProgram decls = do
+  out <- envScopes env (checkFunDecls (M.fromList funs))
+  return (M.fromList (out ++ env))
+  where
+    -- constructors in the program
+    env = [(name, scheme) | (name, ConstructorDecl scheme) <- M.toList decls]
+
+    -- function declarations in the program
+    funs = [(name, (Lambda args expr, scheme)) | (name, FunDecl args expr scheme) <- M.toList decls]
 
 ---------------------------------------------------------------------------------------------------
   -- Check that a types subsume another
@@ -377,7 +487,8 @@ test = wrap $ runTC [("+",Forall [] $ int --> (int --> int))] do
   envScope "-" (Forall [] m0) $ do
     debug $ Lambda ["x"] (lit 42 -: (Var "x" +: lit 43))
   debug rec_letin
-  subsumptionCheck lhs rhs
+  -- subsumptionCheck lhs rhs
+  lift $ print scc
   where
     lit i = Lit (Int i)
     (+:) a b = Apply (Var "+") [a, b]
@@ -395,6 +506,16 @@ test = wrap $ runTC [("+",Forall [] $ int --> (int --> int))] do
 
     rec_letin =
       LetIn "f" (Lambda ["x"] (Apply (Var "+") [Var "x", Apply (Var "f") [Var "x"]])) (Var "f")
+
+    scc = findScc edges nodes
+    nodes = [0, 1, 2, 3, 4, 5]
+    edges 0 3 = True
+    edges 3 5 = True
+    edges 5 0 = True
+    edges 0 2 = True
+    edges 3 1 = True
+    edges 4 0 = True
+    edges _ _ = False
 
     wrap io = do
       res <- io

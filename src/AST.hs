@@ -83,7 +83,7 @@ type TyRef = IORef (Maybe Type)
 -- | A declaration is either a function declaration, or the declaration of a constructor of a given
 -- arity
 data DeclBody
-  = FunDecl [Id] Exp
+  = FunDecl [Id] Exp (Maybe Scheme)
   -- ^ Declare a function with a given set of arguments and a body
   | ConstructorDecl Scheme
   -- ^ Declare a constructor of a specific arity
@@ -123,7 +123,7 @@ instance Show Pattern where
 
 -- | Return @True@ if a function declaration is a function
 declIsFun :: DeclBody -> Bool
-declIsFun (FunDecl _ _) = True
+declIsFun (FunDecl _ _ _) = True
 declIsFun _ = False
 
 -- | Return @True@ if a declaration refer to a constructor
@@ -172,7 +172,7 @@ instance Show Exp where
   show (Case _ _) = "cases"
 
 instance Show DeclBody where
-  show (FunDecl args body) = concat (intersperse " " args) ++ " = " ++ show body
+  show (FunDecl args body _) = concat (intersperse " " args) ++ " = " ++ show body
   show (ConstructorDecl args) = show "tuple("++show args++")"
 
 -- | Return the free variables in an expression
@@ -277,6 +277,7 @@ instance Show Type where
       rhs t = show t
 
 instance Show Scheme where
+  show (Forall [] body) = show body
   show (Forall args body) = "forall " ++ intercalate " " (map show args) ++ ". " ++ show body
 
 class Displayable a where

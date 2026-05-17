@@ -24,7 +24,7 @@ createFunNodes = go
   where
     go decls (Var v) =
      case M.lookup v decls of
-       Just (FunDecl args _) -> Lit (CFun (generateCName v) (length args))
+       Just (FunDecl args _ _) -> Lit (CFun (generateCName v) (length args))
        Just (ConstructorDecl _) -> error "createFunNodes"
        Nothing -> Var v
     go decls (Lit (Cons name)) =
@@ -75,7 +75,8 @@ fresh = Closures (\ s i -> (s, i+1, "fun" ++ show i))
 
 -- | Add a new closure into tha DB
 addClosure :: Id -> [Id] -> Exp -> Closures ()
-addClosure ident args body = Closures (\ s i -> (M.insert ident (FunDecl args body) s, i, ()))
+addClosure ident args body =
+  Closures (\ s i -> (M.insert ident (FunDecl args body Nothing) s, i, ()))
 
 -- | Lower an expression by removing all it's lambda abstractions, it also remove all the recursive
 -- let-in
@@ -110,8 +111,8 @@ removeTopLevelLambdas :: Decls -> Decls
 removeTopLevelLambdas decls =
   fmap go decls
     where
-      go (FunDecl args (Annot x _)) = go (FunDecl args x)
-      go (FunDecl args1 (Lambda args2 x)) = go (FunDecl (args1++args2) x)
+      go (FunDecl args (Annot x _) scheme) = go (FunDecl args x scheme)
+      go (FunDecl args1 (Lambda args2 x) scheme) = go (FunDecl (args1++args2) x scheme)
       go x = x
 
 -- | Perform all the previously explained optimisations and lowering phases on a set of global
@@ -128,7 +129,8 @@ lowerDecls decls' =
     go ((name, d@(ConstructorDecl _)):other_decls) = do
       new_decls <- go other_decls
       return $ M.insert name d new_decls
-    go ((name, FunDecl args body):other_decls) = do
+    go ((name, FunDecl args body scheme):other_decls) = do
       new_decls <- go other_decls
       new_body <- lowerExp (simplifyLambdas (createFunNodes decls body))
-      return $ M.insert (generateCName name) (FunDecl args (simplifyLambdas new_body)) new_decls
+      return $
+        M.insert (generateCName name) (FunDecl args (simplifyLambdas new_body) scheme) new_decls

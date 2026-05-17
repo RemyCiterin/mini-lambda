@@ -67,13 +67,13 @@ map f list =
     Cons a l -> Cons (f a) (map f l)
     Nil -> Nil
 
--- arange n = if n == 0 then Nil else Cons 0 (map (\ x -> x + 1) (arange (n-1)))
-arange n = go 0 n
-  where
-    go x y =
-      if x >= y
-      then Nil
-      else Cons x (go (x+1) y)
+arange n = if n == 0 then Nil else Cons 0 (map (\ x -> x + 1) (arange (n-1)))
+-- arange n = go 0 n
+--   where
+--     go x y =
+--       if x >= y
+--       then Nil
+--       else Cons x (go (x+1) y)
 
 sum list =
   case list of

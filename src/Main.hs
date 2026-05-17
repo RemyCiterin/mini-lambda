@@ -1,6 +1,7 @@
 module Main where
 
 import qualified Data.Map as M
+import Control.Monad
 import Data.List
 import Backend
 import Lower
@@ -43,14 +44,20 @@ main = do
   Typecheck.test
 
   file_content <- lexer <$> readFile "foo.hs"
-  print file_content
+  -- print file_content
 
   let fixities = Parse.findFixities file_content
   let parsed = runParser Parse.program Parse.State{fixities= fixities} "" file_content
-  print parsed
+  -- print parsed
 
   case parsed of
     Right program -> do
+      tc_res <- Typecheck.runTC [] (Typecheck.checkProgram program)
+      case tc_res of
+        Left x -> print x
+        Right m -> forM_ (M.toList m) \ (name, scheme) -> do
+          putStrLn $ name ++ " :: " ++ show scheme
+
       let low = lowerDecls program
       let (strings,_,_) = runCGen (compileDecls low) [] 0
       let file = concat (intersperse "\n" (reverse strings))
